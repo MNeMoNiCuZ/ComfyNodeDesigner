@@ -7,7 +7,7 @@
   "license": "MIT",
   "scripts": {
     "start": "electron-vite preview",
-    "dev": "electron-vite dev",
+    "dev": "electron-vite dev -- --no-sandbox",
     "build": "electron-vite build",
     "lint": "eslint . --ext .js,.jsx,.ts,.tsx",
     "test": "vitest run",
