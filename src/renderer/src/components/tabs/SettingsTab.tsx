@@ -2,28 +2,18 @@ import React, { useState, useEffect } from 'react'
 import { useSettingsStore } from '../../store/settingsStore'
 import type { LLMProvider } from '../../types/llm.types'
 import { PROVIDER_LABELS, DEFAULT_MODELS } from '../../types/llm.types'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle
-} from '../ui/dialog'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
+import { Textarea } from '../ui/textarea'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs'
 import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
-interface SettingsModalProps {
-  open: boolean
-  onClose: () => void
-}
-
 const PROVIDERS: LLMProvider[] = ['openai', 'anthropic', 'google', 'groq', 'xai', 'openrouter', 'ollama']
 
-export function SettingsModal({ open, onClose }: SettingsModalProps): JSX.Element {
-  const { llm, setProviderModel, setProviderBaseUrl, ollamaModels, fetchOllamaModels } = useSettingsStore()
+export function SettingsTab(): JSX.Element {
+  const { llm, setProviderModel, setProviderBaseUrl, ollamaModels, fetchOllamaModels, customInstructions, setCustomInstructions } = useSettingsStore()
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -33,12 +23,10 @@ export function SettingsModal({ open, onClose }: SettingsModalProps): JSX.Elemen
   const [fetchingModels, setFetchingModels] = useState(false)
 
   useEffect(() => {
-    if (open) {
-      window.electronAPI.getApiKeyStatus().then((status: Record<string, boolean>) => {
-        setKeyStatus(status)
-      })
-    }
-  }, [open])
+    window.electronAPI.getApiKeyStatus().then((status: Record<string, boolean>) => {
+      setKeyStatus(status)
+    })
+  }, [])
 
   async function handleSaveApiKey(provider: LLMProvider): Promise<void> {
     const key = apiKeys[provider] ?? ''
@@ -46,7 +34,7 @@ export function SettingsModal({ open, onClose }: SettingsModalProps): JSX.Elemen
     try {
       await window.electronAPI.saveApiKey(provider, key)
       setKeyStatus((s) => ({ ...s, [provider]: !!key }))
-      setApiKeys((k) => ({ ...k, [provider]: '' })) // clear from memory
+      setApiKeys((k) => ({ ...k, [provider]: '' }))
     } finally {
       setSaving((s) => ({ ...s, [provider]: false }))
     }
@@ -78,14 +66,14 @@ export function SettingsModal({ open, onClose }: SettingsModalProps): JSX.Elemen
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>Settings — LLM Providers</DialogTitle>
-        </DialogHeader>
-        <p className="text-xs text-muted-foreground -mt-2">
-          API keys are encrypted and stored locally on your machine. They never leave the app.
-        </p>
+    <div className="h-full overflow-y-auto">
+      <div className="max-w-2xl mx-auto p-6 space-y-6">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-200">Settings</h2>
+          <p className="text-xs text-muted-foreground mt-1">
+            API keys are encrypted and stored locally on your machine. They never leave the app.
+          </p>
+        </div>
 
         <Tabs defaultValue="openai">
           <TabsList className="w-full grid grid-cols-4 h-auto flex-wrap gap-1 bg-slate-800">
@@ -256,10 +244,20 @@ export function SettingsModal({ open, onClose }: SettingsModalProps): JSX.Elemen
           })}
         </Tabs>
 
-        <div className="flex justify-end pt-2">
-          <Button onClick={onClose}>Done</Button>
+        {/* Custom AI Instructions */}
+        <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-2">
+          <Label className="text-sm font-semibold text-slate-200">Custom AI Instructions</Label>
+          <p className="text-xs text-muted-foreground">
+            This text is appended to the system prompt for all AI generations. Use it to guide the AI's coding style or add project-specific context.
+          </p>
+          <Textarea
+            value={customInstructions}
+            onChange={(e) => setCustomInstructions(e.target.value)}
+            placeholder="E.g. Always use numpy for array operations. Prefer explicit error handling over silent failures."
+            className="resize-none h-24 text-sm font-mono"
+          />
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   )
 }

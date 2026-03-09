@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useProjectStore } from '../../store/projectStore'
+import { useSettingsStore } from '../../store/settingsStore'
 import { Button } from '../ui/button'
 import {
   FilePlus,
@@ -10,14 +11,13 @@ import {
   Box,
   Pencil
 } from 'lucide-react'
-import { SettingsModal } from '../modals/SettingsModal'
 import { ExportModal } from '../modals/ExportModal'
 import { cn } from '../../lib/utils'
 
 export function TitleBar(): JSX.Element {
   const { project, isDirty, newProject, setProject, setCurrentFilePath, currentFilePath, setProjectName } =
     useProjectStore()
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const { setActiveEditorTab } = useSettingsStore()
   const [exportOpen, setExportOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editingName, setEditingName] = useState(false)
@@ -47,10 +47,10 @@ export function TitleBar(): JSX.Element {
       const confirmed = window.confirm('You have unsaved changes. Open another project anyway?')
       if (!confirmed) return
     }
-    const loaded = await window.electronAPI.loadProject()
-    if (loaded) {
-      setProject(loaded)
-      setCurrentFilePath(null) // path not returned by load, reset
+    const result = await window.electronAPI.loadProject()
+    if (result) {
+      setProject(result.project)
+      setCurrentFilePath(result.filePath)
     }
   }
 
@@ -58,12 +58,13 @@ export function TitleBar(): JSX.Element {
     setSaving(true)
     try {
       const result = await window.electronAPI.saveProject(project, currentFilePath ?? undefined)
-      setCurrentFilePath(result.path)
-      useProjectStore.getState().setDirty(false)
-    } catch (e) {
-      if ((e as Error).message !== 'Save cancelled') {
-        alert(`Save failed: ${(e as Error).message}`)
+      if (result) {
+        setCurrentFilePath(result.path)
+        useProjectStore.getState().setDirty(false)
       }
+      // result is null when user cancelled the dialog — do nothing
+    } catch (e) {
+      alert(`Save failed: ${(e as Error).message ?? String(e)}`)
     } finally {
       setSaving(false)
     }
@@ -71,9 +72,9 @@ export function TitleBar(): JSX.Element {
 
   return (
     <>
-      <div className="titlebar-drag flex h-9 items-center bg-slate-900 border-b border-slate-700/50 px-3 gap-2 select-none">
-        {/* App icon + title */}
-        <div className="titlebar-nodrag flex items-center gap-2 mr-4">
+      <div className="titlebar-drag flex h-9 items-center bg-slate-900 border-b border-slate-700/50 px-3 pr-36 gap-2 select-none">
+        {/* App icon + title — stays draggable */}
+        <div className="flex items-center gap-2 mr-4">
           <Box className="h-4 w-4 text-blue-400 shrink-0" />
           <span className="text-sm font-semibold text-slate-200">ComfyNode Designer</span>
         </div>
@@ -116,8 +117,8 @@ export function TitleBar(): JSX.Element {
           </Button>
         </div>
 
-        {/* Project name — click to edit */}
-        <div className="titlebar-nodrag flex-1 flex items-center justify-center">
+        {/* Project name — click to edit; only the button/input is no-drag */}
+        <div className="flex-1 flex items-center justify-center">
           {editingName ? (
             <input
               ref={nameInputRef}
@@ -128,11 +129,11 @@ export function TitleBar(): JSX.Element {
                 if (e.key === 'Enter') commitName()
                 if (e.key === 'Escape') { setNameValue(project.name); setEditingName(false) }
               }}
-              className="bg-slate-800 border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-200 text-center w-48 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="titlebar-nodrag bg-slate-800 border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-200 text-center w-48 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           ) : (
             <button
-              className="group flex items-center gap-1.5 text-xs text-muted-foreground hover:text-slate-200 transition-colors rounded px-2 py-0.5 hover:bg-slate-800"
+              className="titlebar-nodrag group flex items-center gap-1.5 text-xs text-muted-foreground hover:text-slate-200 transition-colors rounded px-2 py-0.5 hover:bg-slate-800"
               onClick={() => setEditingName(true)}
               title="Click to rename project"
             >
@@ -158,7 +159,7 @@ export function TitleBar(): JSX.Element {
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-slate-300 hover:text-white"
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => setActiveEditorTab('settings')}
             title="Settings"
           >
             <Settings className="h-4 w-4" />
@@ -166,7 +167,6 @@ export function TitleBar(): JSX.Element {
         </div>
       </div>
 
-      <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} />
     </>
   )

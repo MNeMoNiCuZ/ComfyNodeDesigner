@@ -255,7 +255,7 @@ describe('generateAllFiles — package files', () => {
   it('generates __init__.py with imports', () => {
     const node = makeNode()
     const { initPy } = generateAllFiles([node], 'pack')
-    expect(initPy).toContain('from .nodes import')
+    expect(initPy).toContain('from .nodes.pack_nodes import')
     expect(initPy).toContain('my_test_node')
     expect(initPy).toContain('NODE_CLASS_MAPPINGS')
     expect(initPy).toContain('NODE_DISPLAY_NAME_MAPPINGS')

@@ -10,7 +10,7 @@ import {
   handleSaveSettings,
   handleLoadSettings
 } from './ipc/fileHandlers'
-import { handleGenerateLLM, handleTestConnection, handleFetchOllamaModels } from './ipc/llmHandlers'
+import { handleGenerateLLM, handleGenerateLLMChat, handleTestConnection, handleFetchOllamaModels, abortRequest } from './ipc/llmHandlers'
 import type { LLMProvider } from '../renderer/src/types/llm.types'
 
 function createWindow(): BrowserWindow {
@@ -70,6 +70,15 @@ app.whenReady().then(() => {
   ipcMain.handle('llm:generate', async (_, req) => {
     const keys = await handleGetApiKeys(safeStorage)
     return handleGenerateLLM(req, (provider: LLMProvider) => keys[provider])
+  })
+
+  ipcMain.handle('llm:generate-chat', async (_, req) => {
+    const keys = await handleGetApiKeys(safeStorage)
+    return handleGenerateLLMChat(req, (provider: LLMProvider) => keys[provider])
+  })
+
+  ipcMain.handle('llm:abort', (_, requestId) => {
+    abortRequest(requestId)
   })
 
   ipcMain.handle('llm:test-connection', async (_, provider, model, baseUrl) => {

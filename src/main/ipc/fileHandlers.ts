@@ -7,7 +7,7 @@ import { generateAllFiles } from '../generators/codeGenerator'
 export async function handleSaveProject(
   project: Project,
   currentPath?: string
-): Promise<{ path: string }> {
+): Promise<{ path: string } | null> {
   let filePath = currentPath
   if (!filePath) {
     const result = await dialog.showSaveDialog({
@@ -19,7 +19,7 @@ export async function handleSaveProject(
       ]
     })
     if (result.canceled || !result.filePath) {
-      throw new Error('Save cancelled')
+      return null // User cancelled
     }
     filePath = result.filePath
   }
@@ -27,7 +27,7 @@ export async function handleSaveProject(
   return { path: filePath }
 }
 
-export async function handleLoadProject(): Promise<Project | null> {
+export async function handleLoadProject(): Promise<{ project: Project; filePath: string } | null> {
   const result = await dialog.showOpenDialog({
     title: 'Open Project',
     filters: [
@@ -38,7 +38,8 @@ export async function handleLoadProject(): Promise<Project | null> {
   })
   if (result.canceled || !result.filePaths[0]) return null
   const content = await fs.readFile(result.filePaths[0], 'utf-8')
-  return JSON.parse(content) as Project
+  const project = JSON.parse(content) as Project
+  return { project, filePath: result.filePaths[0] }
 }
 
 export async function handleExportCode(
@@ -62,9 +63,11 @@ export async function handleExportCode(
       properties: ['openDirectory', 'createDirectory']
     })
     if (result.canceled || !result.filePaths[0]) return
-    const dir = path.join(result.filePaths[0], projectName.replace(/[^a-zA-Z0-9_-]/g, '_'))
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(path.join(dir, 'nodes.py'), files.nodesPy, 'utf-8')
+    const sanitized = projectName.replace(/[^a-zA-Z0-9_-]/g, '_')
+    const dir = path.join(result.filePaths[0], sanitized)
+    const nodesDir = path.join(dir, 'nodes')
+    await fs.mkdir(nodesDir, { recursive: true })
+    await fs.writeFile(path.join(nodesDir, `${sanitized}_nodes.py`), files.nodesPy, 'utf-8')
     await fs.writeFile(path.join(dir, '__init__.py'), files.initPy, 'utf-8')
     await fs.writeFile(path.join(dir, 'requirements.txt'), files.requirementsTxt, 'utf-8')
     await fs.writeFile(path.join(dir, 'README.md'), files.readmeMd, 'utf-8')

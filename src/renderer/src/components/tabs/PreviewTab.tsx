@@ -14,6 +14,8 @@ export function PreviewTab(): JSX.Element {
   const [copied, setCopied] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
 
+  const sanitizedName = project.name.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
+
   const files = useMemo(
     () => generateAllFiles(project.nodes, project.name),
     [project.nodes, project.name]
@@ -25,6 +27,13 @@ export function PreviewTab(): JSX.Element {
       : mode === 'nodes_py'
         ? files.nodesPy
         : files.initPy
+
+  const fileLabel =
+    mode === 'single'
+      ? `${sanitizedName}.py`
+      : mode === 'nodes_py'
+        ? `${sanitizedName}/nodes/${sanitizedName}_nodes.py`
+        : `${sanitizedName}/__init__.py`
 
   function handleCopy(): void {
     navigator.clipboard.writeText(code)
@@ -57,6 +66,8 @@ export function PreviewTab(): JSX.Element {
             </button>
           ))}
         </div>
+
+        <span className="text-xs text-slate-500 font-mono truncate">{fileLabel}</span>
 
         <div className="flex-1" />
 

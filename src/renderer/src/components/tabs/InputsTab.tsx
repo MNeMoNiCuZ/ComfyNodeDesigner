@@ -162,7 +162,7 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
             </Tooltip>
 
             {/* Order controls */}
-            <div className="hidden group-hover:flex flex-col gap-0.5">
+            <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
               <button
                 className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-30"
                 onClick={() => handleMove(input.id, 'up')}
