@@ -26,6 +26,7 @@ declare global {
 
       setTitle: (title: string) => Promise<void>
 
+      loadProjectFromPath: (filePath: string) => Promise<{ project: Project; filePath: string } | null>
       importNodeFolder: () => Promise<any[]>
     }
   }

@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Window
   setTitle: (title: string) => ipcRenderer.invoke('window:set-title', title),
 
+  loadProjectFromPath: (filePath: string) => ipcRenderer.invoke('file:load-project-path', filePath),
+
   // Import
   importNodeFolder: () => ipcRenderer.invoke('file:import-node-folder')
 })

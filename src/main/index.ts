@@ -4,6 +4,7 @@ import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
   handleSaveProject,
   handleLoadProject,
+  handleLoadProjectFromPath,
   handleExportCode,
   handleSaveApiKey,
   handleGetApiKeys,
@@ -106,6 +107,7 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:save', (_, settings) => handleSaveSettings(settings))
   ipcMain.handle('settings:load', () => handleLoadSettings())
   ipcMain.handle('window:set-title', (_, title) => mainWin.setTitle(title))
+  ipcMain.handle('file:load-project-path', (_, filePath) => handleLoadProjectFromPath(filePath))
   ipcMain.handle('file:import-node-folder', () => handleImportNodeFolder())
 
   app.on('activate', () => {

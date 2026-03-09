@@ -80,14 +80,15 @@ export function TitleBar(): JSX.Element {
       if (!confirmed) return
     }
     try {
-      // Use the same loadProject IPC but we can't pass a path directly — instead
-      // load via a custom approach: we re-use the loadProject result structure
-      // by simulating the IPC (the main process doesn't accept a path param).
-      // Since we can't bypass the dialog easily, we fall back to normal open
-      // and notify user.
-      alert(`Please use File > Open and navigate to:\n${recentPath}`)
-    } catch {
-      // ignore
+      const result = await window.electronAPI.loadProjectFromPath(recentPath)
+      if (result) {
+        openProject(result.project, result.filePath)
+        addRecentProject(result.filePath, result.project.name)
+      } else {
+        alert(`Could not open project at:\n${recentPath}\n\nThe file may have been moved or deleted.`)
+      }
+    } catch (e) {
+      alert(`Failed to open project: ${(e as Error).message}`)
     }
   }
 
