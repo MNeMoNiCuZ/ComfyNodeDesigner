@@ -41,7 +41,7 @@ class ErrorBoundary extends React.Component<
 }
 
 export default function App(): JSX.Element {
-  const { project, isDirty, addNode, setProject, setCurrentFilePath, currentFilePath } =
+  const { project, isDirty, openProject, setCurrentFilePath, currentFilePath } =
     useProjectStore()
   const { loadFromMain } = useSettingsStore()
 
@@ -75,8 +75,7 @@ export default function App(): JSX.Element {
         e.preventDefault()
         window.electronAPI.loadProject().then((loaded: any) => {
           if (loaded) {
-            setProject(loaded)
-            setCurrentFilePath(null)
+            openProject(loaded.project, loaded.filePath)
           }
         })
       }

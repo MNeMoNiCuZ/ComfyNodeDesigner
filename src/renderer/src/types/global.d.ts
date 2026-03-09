@@ -25,6 +25,8 @@ declare global {
       getSettings: () => Promise<Record<string, unknown> | null>
 
       setTitle: (title: string) => Promise<void>
+
+      importNodeFolder: () => Promise<any[]>
     }
   }
 }

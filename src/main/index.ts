@@ -8,7 +8,8 @@ import {
   handleSaveApiKey,
   handleGetApiKeys,
   handleSaveSettings,
-  handleLoadSettings
+  handleLoadSettings,
+  handleImportNodeFolder
 } from './ipc/fileHandlers'
 import { handleGenerateLLM, handleGenerateLLMChat, handleTestConnection, handleFetchOllamaModels, abortRequest } from './ipc/llmHandlers'
 import type { LLMProvider } from '../renderer/src/types/llm.types'
@@ -105,6 +106,7 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:save', (_, settings) => handleSaveSettings(settings))
   ipcMain.handle('settings:load', () => handleLoadSettings())
   ipcMain.handle('window:set-title', (_, title) => mainWin.setTitle(title))
+  ipcMain.handle('file:import-node-folder', () => handleImportNodeFolder())
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

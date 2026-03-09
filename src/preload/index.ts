@@ -36,5 +36,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getSettings: () => ipcRenderer.invoke('settings:load'),
 
   // Window
-  setTitle: (title: string) => ipcRenderer.invoke('window:set-title', title)
+  setTitle: (title: string) => ipcRenderer.invoke('window:set-title', title),
+
+  // Import
+  importNodeFolder: () => ipcRenderer.invoke('file:import-node-folder')
 })
