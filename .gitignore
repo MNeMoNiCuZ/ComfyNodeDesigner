@@ -205,3 +205,9 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Node.js / Electron
+node_modules/
+out/
+dist/
+*.tsbuildinfo
