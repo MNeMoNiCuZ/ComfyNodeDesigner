@@ -82,7 +82,7 @@ export function InputEditModal({ open, input, onSave, onClose }: InputEditModalP
           <DialogTitle>{isNew ? 'Add Input' : 'Edit Input'}</DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <form onSubmit={(e) => { e.preventDefault(); if (canSave) handleSave() }} className="space-y-4 py-2">
           {/* Name */}
           <div className="space-y-1.5">
             <FieldLabel
@@ -267,11 +267,11 @@ export function InputEditModal({ open, input, onSave, onClose }: InputEditModalP
               </div>
             </div>
           )}
-        </div>
+        </form>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={handleSave} disabled={!canSave}>
+          <Button variant="ghost" onClick={onClose} type="button">Cancel</Button>
+          <Button onClick={handleSave} disabled={!canSave} type="button">
             {isNew ? 'Add Input' : 'Save Changes'}
           </Button>
         </DialogFooter>

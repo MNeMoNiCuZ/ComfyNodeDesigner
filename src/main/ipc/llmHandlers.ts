@@ -1,17 +1,26 @@
 import Anthropic from '@anthropic-ai/sdk'
 import OpenAI from 'openai'
 import Groq from 'groq-sdk'
-import type { LLMGenerateRequest, LLMProvider } from '../../renderer/src/types/llm.types'
+import type { LLMGenerateRequest, LLMChatRequest, LLMProvider } from '../../renderer/src/types/llm.types'
+
+// Abort controller registry for in-flight requests
+const abortControllers = new Map<string, AbortController>()
+
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
 
 interface LLMAdapter {
-  generate(system: string, user: string, model: string): Promise<string>
+  generate(system: string, user: string, model: string, signal?: AbortSignal): Promise<string>
+  generateChat(system: string, messages: ChatMessage[], model: string, signal?: AbortSignal): Promise<string>
   testConnection(model: string): Promise<boolean>
 }
 
 function getOpenAICompatibleAdapter(apiKey: string, baseURL?: string): LLMAdapter {
   const client = new OpenAI({ apiKey, ...(baseURL ? { baseURL } : {}) })
   return {
-    async generate(system, user, model) {
+    async generate(system, user, model, signal?) {
       const response = await client.chat.completions.create({
         model,
         messages: [
@@ -19,7 +28,18 @@ function getOpenAICompatibleAdapter(apiKey: string, baseURL?: string): LLMAdapte
           { role: 'user', content: user }
         ],
         max_tokens: 4096
-      })
+      }, { signal: signal as any })
+      return response.choices[0]?.message?.content ?? ''
+    },
+    async generateChat(system, messages, model, signal?) {
+      const response = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: system },
+          ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+        ],
+        max_tokens: 4096
+      }, { signal: signal as any })
       return response.choices[0]?.message?.content ?? ''
     },
     async testConnection(model) {
@@ -40,13 +60,23 @@ function getOpenAICompatibleAdapter(apiKey: string, baseURL?: string): LLMAdapte
 function getAnthropicAdapter(apiKey: string): LLMAdapter {
   const client = new Anthropic({ apiKey })
   return {
-    async generate(system, user, model) {
+    async generate(system, user, model, signal?) {
       const response = await client.messages.create({
         model,
         max_tokens: 4096,
         system,
         messages: [{ role: 'user', content: user }]
-      })
+      }, { signal: signal as any })
+      const block = response.content[0]
+      return block?.type === 'text' ? block.text : ''
+    },
+    async generateChat(system, messages, model, signal?) {
+      const response = await client.messages.create({
+        model,
+        max_tokens: 4096,
+        system,
+        messages: messages.map((m) => ({ role: m.role, content: m.content }))
+      }, { signal: signal as any })
       const block = response.content[0]
       return block?.type === 'text' ? block.text : ''
     },
@@ -66,40 +96,46 @@ function getAnthropicAdapter(apiKey: string): LLMAdapter {
 }
 
 function getGoogleAdapter(apiKey: string): LLMAdapter {
+  async function googleCall(system: string, contents: Array<{ role: string; parts: Array<{ text: string }> }>, model: string, maxTokens: number, signal?: AbortSignal): Promise<string> {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+    const body: Record<string, unknown> = {
+      contents,
+      generationConfig: { maxOutputTokens: maxTokens }
+    }
+    if (system) {
+      body.systemInstruction = { parts: [{ text: system }] }
+    }
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal
+    })
+    if (!response.ok) {
+      const err = await response.text()
+      throw new Error(`Google API error: ${err}`)
+    }
+    const data = (await response.json()) as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+    }
+    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+  }
+
   return {
-    async generate(system, user, model) {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-      const body = {
-        systemInstruction: { parts: [{ text: system }] },
-        contents: [{ role: 'user', parts: [{ text: user }] }],
-        generationConfig: { maxOutputTokens: 4096 }
-      }
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      })
-      if (!response.ok) {
-        const err = await response.text()
-        throw new Error(`Google API error: ${err}`)
-      }
-      const data = (await response.json()) as {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-      }
-      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+    async generate(system, user, model, signal?) {
+      return googleCall(system, [{ role: 'user', parts: [{ text: user }] }], model, 4096, signal)
+    },
+    async generateChat(system, messages, model, signal?) {
+      const contents = messages.map((m) => ({
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: m.content }]
+      }))
+      return googleCall(system, contents, model, 4096, signal)
     },
     async testConnection(model) {
       try {
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ role: 'user', parts: [{ text: 'Reply: ok' }] }],
-            generationConfig: { maxOutputTokens: 5 }
-          })
-        })
-        return response.ok
+        await googleCall('', [{ role: 'user', parts: [{ text: 'Reply: ok' }] }], model, 5)
+        return true
       } catch {
         return false
       }
@@ -110,7 +146,7 @@ function getGoogleAdapter(apiKey: string): LLMAdapter {
 function getGroqAdapter(apiKey: string): LLMAdapter {
   const client = new Groq({ apiKey })
   return {
-    async generate(system, user, model) {
+    async generate(system, user, model, signal?) {
       const response = await client.chat.completions.create({
         model,
         messages: [
@@ -118,7 +154,18 @@ function getGroqAdapter(apiKey: string): LLMAdapter {
           { role: 'user', content: user }
         ],
         max_tokens: 4096
-      })
+      }, { signal: signal as any })
+      return response.choices[0]?.message?.content ?? ''
+    },
+    async generateChat(system, messages, model, signal?) {
+      const response = await client.chat.completions.create({
+        model,
+        messages: [
+          { role: 'system', content: system },
+          ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
+        ],
+        max_tokens: 4096
+      }, { signal: signal as any })
       return response.choices[0]?.message?.content ?? ''
     },
     async testConnection(model) {
@@ -138,26 +185,33 @@ function getGroqAdapter(apiKey: string): LLMAdapter {
 
 function getOllamaAdapter(baseUrl: string): LLMAdapter {
   const base = baseUrl.replace(/\/$/, '')
+  async function ollamaChat(messages: Array<{ role: string; content: string }>, model: string, signal?: AbortSignal): Promise<string> {
+    const response = await fetch(`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, messages, stream: false }),
+      signal
+    })
+    if (!response.ok) {
+      const err = await response.text()
+      throw new Error(`Ollama error: ${err}`)
+    }
+    const data = (await response.json()) as { message?: { content?: string } }
+    return data.message?.content ?? ''
+  }
+
   return {
-    async generate(system, user, model) {
-      const response = await fetch(`${base}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user }
-          ],
-          stream: false
-        })
-      })
-      if (!response.ok) {
-        const err = await response.text()
-        throw new Error(`Ollama error: ${err}`)
-      }
-      const data = (await response.json()) as { message?: { content?: string } }
-      return data.message?.content ?? ''
+    async generate(system, user, model, signal?) {
+      return ollamaChat([
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ], model, signal)
+    },
+    async generateChat(system, messages, model, signal?) {
+      return ollamaChat([
+        { role: 'system', content: system },
+        ...messages
+      ], model, signal)
     },
     async testConnection(model) {
       try {
@@ -203,6 +257,40 @@ export async function handleGenerateLLM(
   }
   const adapter = getAdapter(req, apiKey)
   return adapter.generate(req.systemPrompt, req.userPrompt, req.model)
+}
+
+export async function handleGenerateLLMChat(
+  req: LLMChatRequest,
+  getApiKey: (provider: LLMProvider) => string | undefined
+): Promise<string> {
+  const apiKey = req.provider === 'ollama' ? '' : (getApiKey(req.provider) ?? '')
+  if (req.provider !== 'ollama' && !apiKey) {
+    throw new Error(`No API key configured for provider: ${req.provider}`)
+  }
+
+  const controller = new AbortController()
+  abortControllers.set(req.requestId, controller)
+
+  try {
+    const adapter = getAdapter(req as unknown as LLMGenerateRequest, apiKey)
+    const result = await adapter.generateChat(
+      req.systemPrompt,
+      req.messages,
+      req.model,
+      controller.signal
+    )
+    return result
+  } finally {
+    abortControllers.delete(req.requestId)
+  }
+}
+
+export function abortRequest(requestId: string): void {
+  const controller = abortControllers.get(requestId)
+  if (controller) {
+    controller.abort()
+    abortControllers.delete(requestId)
+  }
 }
 
 export async function handleTestConnection(

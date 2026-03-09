@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // LLM
   generateLLM: (req: unknown) => ipcRenderer.invoke('llm:generate', req),
 
+  generateLLMChat: (req: unknown) => ipcRenderer.invoke('llm:generate-chat', req),
+
+  abortLLM: (requestId: string) => ipcRenderer.invoke('llm:abort', requestId),
+
   testConnection: (provider: string, model: string, baseUrl?: string) =>
     ipcRenderer.invoke('llm:test-connection', provider, model, baseUrl),
 

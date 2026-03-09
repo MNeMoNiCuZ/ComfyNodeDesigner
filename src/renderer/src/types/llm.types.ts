@@ -26,20 +26,35 @@ export interface LLMGenerateRequest {
   userPrompt: string
 }
 
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant' | 'error'
+  content: string
+  timestamp: number
+  elapsedMs?: number
+}
+
+export interface LLMChatRequest {
+  provider: LLMProvider
+  model: string
+  baseUrl?: string
+  systemPrompt: string
+  messages: { role: 'user' | 'assistant'; content: string }[]
+  requestId: string
+}
+
 export const DEFAULT_MODELS: Record<LLMProvider, string[]> = {
-  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1', 'o1-mini'],
+  openai: ['gpt-5.4', 'gpt-5.4-pro', 'gpt-5.3-instant', 'gpt-4o', 'gpt-4o-mini'],
   anthropic: [
-    'claude-sonnet-4-6',
     'claude-opus-4-6',
-    'claude-haiku-4-5-20251001',
-    'claude-3-5-sonnet-20241022',
-    'claude-3-opus-20240229'
+    'claude-sonnet-4-6',
+    'claude-haiku-4-5-20251001'
   ],
-  google: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+  google: ['gemini-3.1-pro', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'],
   groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
   xai: ['grok-3', 'grok-3-mini', 'grok-2'],
-  openrouter: ['openai/gpt-4o', 'anthropic/claude-3.5-sonnet', 'meta-llama/llama-3.3-70b-instruct'],
-  ollama: ['llama3.3', 'codellama', 'mistral', 'deepseek-coder']
+  openrouter: ['openai/gpt-5.4', 'anthropic/claude-sonnet-4-6', 'google/gemini-3.1-pro', 'meta-llama/llama-3.3-70b-instruct'],
+  ollama: []  // Populated dynamically from local Ollama instance
 }
 
 export const PROVIDER_LABELS: Record<LLMProvider, string> = {
@@ -55,16 +70,16 @@ export const PROVIDER_LABELS: Record<LLMProvider, string> = {
 export const DEFAULT_LLM_SETTINGS: LLMSettings = {
   activeProvider: 'openai',
   providers: {
-    openai: { provider: 'openai', model: 'gpt-4o' },
+    openai: { provider: 'openai', model: 'gpt-5.4' },
     anthropic: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
-    google: { provider: 'google', model: 'gemini-2.0-flash' },
+    google: { provider: 'google', model: 'gemini-3.1-pro' },
     groq: { provider: 'groq', model: 'llama-3.3-70b-versatile' },
     xai: { provider: 'xai', model: 'grok-3', baseUrl: 'https://api.x.ai/v1' },
     openrouter: {
       provider: 'openrouter',
-      model: 'openai/gpt-4o',
+      model: 'openai/gpt-5.4',
       baseUrl: 'https://openrouter.ai/api/v1'
     },
-    ollama: { provider: 'ollama', model: 'llama3.3', baseUrl: 'http://localhost:11434' }
+    ollama: { provider: 'ollama', model: '', baseUrl: 'http://localhost:11434' }
   }
 }

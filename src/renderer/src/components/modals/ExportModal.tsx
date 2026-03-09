@@ -92,7 +92,7 @@ export function ExportModal({ open, onClose }: ExportModalProps): JSX.Element {
             <div>
               <p className="text-sm font-semibold">Full package</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                Folder with <code className="font-mono">__init__.py</code>, <code className="font-mono">nodes.py</code>, <code className="font-mono">requirements.txt</code>, and <code className="font-mono">README.md</code>.
+                Folder with <code className="font-mono">__init__.py</code>, <code className="font-mono">nodes/</code> subfolder, <code className="font-mono">requirements.txt</code>, and <code className="font-mono">README.md</code>.
               </p>
               <p className="text-xs text-slate-500 mt-1 font-mono">
                 {project.name}/ (4 files)
@@ -112,7 +112,8 @@ export function ExportModal({ open, onClose }: ExportModalProps): JSX.Element {
             <ul className="text-xs text-slate-400 space-y-1 font-mono">
               <li>📁 {project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}/</li>
               <li className="ml-4">📄 __init__.py</li>
-              <li className="ml-4">📄 nodes.py</li>
+              <li className="ml-4">📁 nodes/</li>
+              <li className="ml-8">📄 {project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_nodes.py</li>
               <li className="ml-4">📄 requirements.txt</li>
               <li className="ml-4">📄 README.md</li>
             </ul>
