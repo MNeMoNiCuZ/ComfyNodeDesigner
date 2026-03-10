@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react'
-import type { ComfyNodeDef } from '../../types/node.types'
+import type { ComfyNodeDef, ComfyType, NodeInput, NodeOutput } from '../../types/node.types'
 import type { ChatMessage } from '../../types/llm.types'
 import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -15,8 +15,18 @@ interface LLMTabProps {
   node: ComfyNodeDef
 }
 
+type EditMode = 'execute' | 'fullnode'
+
+const VALID_COMFY_TYPES = new Set([
+  'IMAGE', 'LATENT', 'CONDITIONING', 'MODEL', 'VAE', 'CLIP', 'MASK',
+  'CONTROL_NET', 'STYLE_MODEL', 'CLIP_VISION', 'CLIP_VISION_OUTPUT',
+  'UPSCALE_MODEL', 'SAMPLER', 'SIGMAS', 'GUIDER', 'NOISE', 'GLIGEN',
+  'AUDIO', 'INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO', '*'
+])
+
+const WIDGET_INPUT_TYPES = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
+
 function extractCodeBlock(text: string): string | null {
-  // Try to extract a python code block first, then any code block
   const pyMatch = text.match(/```python\s*\n([\s\S]*?)```/)
   if (pyMatch) return pyMatch[1].trim()
   const anyMatch = text.match(/```\s*\n?([\s\S]*?)```/)
@@ -28,6 +38,148 @@ function generateId(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
 }
 
+function buildFullNodeSystemPrompt(node: ComfyNodeDef): string {
+  const inputsSummary = node.inputs.map((i) => ({
+    name: i.name,
+    type: i.type,
+    required: i.required,
+    forceInput: i.forceInput ?? false
+  }))
+  const outputsSummary = node.outputs.map((o) => ({ name: o.name, type: o.type }))
+
+  return `You are an expert ComfyUI custom node developer. The user wants to redesign a node's inputs, outputs, and execute() method body.
+
+Current node state:
+- Internal name: ${node.internalName}
+- Display name: ${node.displayName}
+- Category: ${node.category}
+
+Current inputs: ${JSON.stringify(inputsSummary, null, 2)}
+
+Current outputs: ${JSON.stringify(outputsSummary, null, 2)}
+
+Current execute() body:
+\`\`\`python
+${node.executeBody}
+\`\`\`
+
+VALID ComfyUI types (use EXACTLY these strings, case-sensitive):
+IMAGE, LATENT, CONDITIONING, MODEL, VAE, CLIP, MASK, CONTROL_NET, STYLE_MODEL, CLIP_VISION, CLIP_VISION_OUTPUT, UPSCALE_MODEL, SAMPLER, SIGMAS, GUIDER, NOISE, GLIGEN, AUDIO, INT, FLOAT, STRING, BOOLEAN, COMBO, *
+
+You MUST respond with ONLY valid JSON — no explanation, no markdown, no prose. Use this exact schema:
+{
+  "inputs": [
+    {
+      "name": "image",
+      "type": "IMAGE",
+      "required": true,
+      "forceInput": true,
+      "widget": null
+    }
+  ],
+  "outputs": [
+    {
+      "name": "image",
+      "type": "IMAGE"
+    }
+  ],
+  "executeBody": "        # your Python code here\\n        return (image,)"
+}
+
+Widget object format (only for INT/FLOAT/STRING/BOOLEAN/COMBO with forceInput=false):
+{ "min": 0, "max": 100, "step": 1, "default": 50, "multiline": false, "comboOptions": ["opt1", "opt2"] }
+Set widget to null for socket types (IMAGE, LATENT, MODEL, etc.).
+
+Rules:
+- executeBody is ONLY the indented function body lines, NOT the def line
+- Use 8-space indentation for executeBody
+- Socket-type inputs (IMAGE, LATENT, MODEL, VAE, etc.) must have forceInput: true, widget: null
+- Widget inputs (INT, FLOAT, STRING, BOOLEAN, COMBO) typically have forceInput: false
+- The return statement in executeBody must match the number and types of outputs`
+}
+
+interface ParsedFullNode {
+  inputs: NodeInput[]
+  outputs: NodeOutput[]
+  executeBody: string
+}
+
+function parseFullNodeResponse(text: string): ParsedFullNode | { error: string } {
+  // Try to extract from json code block first, then bare JSON object
+  let jsonStr = text
+  const jsonBlock = text.match(/```(?:json)?\s*\n([\s\S]*?)```/)
+  if (jsonBlock) {
+    jsonStr = jsonBlock[1]
+  } else {
+    // Find outermost {} block
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start !== -1 && end > start) jsonStr = text.slice(start, end + 1)
+  }
+
+  let parsed: any
+  try {
+    parsed = JSON.parse(jsonStr.trim())
+  } catch (e) {
+    return { error: `Could not parse JSON from response: ${(e as Error).message}` }
+  }
+
+  if (!Array.isArray(parsed.inputs)) return { error: 'Response missing "inputs" array' }
+  if (!Array.isArray(parsed.outputs)) return { error: 'Response missing "outputs" array' }
+  if (typeof parsed.executeBody !== 'string') return { error: 'Response missing "executeBody" string' }
+
+  const inputs: NodeInput[] = []
+  for (const inp of parsed.inputs) {
+    if (!inp.name || typeof inp.name !== 'string') {
+      return { error: 'An input entry is missing a "name" field' }
+    }
+    const type = String(inp.type ?? '').toUpperCase()
+    if (!VALID_COMFY_TYPES.has(type)) {
+      return { error: `Invalid type "${inp.type}" for input "${inp.name}". Must be one of: ${[...VALID_COMFY_TYPES].join(', ')}` }
+    }
+    const isWidget = WIDGET_INPUT_TYPES.has(type)
+    const forceInput = inp.forceInput !== undefined ? Boolean(inp.forceInput) : !isWidget
+    let widget: NodeInput['widget'] | undefined
+    if (inp.widget && typeof inp.widget === 'object') {
+      widget = {}
+      if (inp.widget.min !== undefined) widget.min = Number(inp.widget.min)
+      if (inp.widget.max !== undefined) widget.max = Number(inp.widget.max)
+      if (inp.widget.step !== undefined) widget.step = Number(inp.widget.step)
+      if (inp.widget.default !== undefined) widget.default = inp.widget.default
+      if (inp.widget.multiline !== undefined) widget.multiline = Boolean(inp.widget.multiline)
+      if (Array.isArray(inp.widget.comboOptions)) widget.comboOptions = inp.widget.comboOptions
+    }
+    inputs.push({
+      id: crypto.randomUUID(),
+      name: inp.name,
+      type: type as ComfyType,
+      required: inp.required !== false,
+      forceInput,
+      widget,
+      tooltip: ''
+    })
+  }
+
+  const outputs: NodeOutput[] = []
+  for (const out of parsed.outputs) {
+    if (!out.name || typeof out.name !== 'string') {
+      return { error: 'An output entry is missing a "name" field' }
+    }
+    const type = String(out.type ?? '').toUpperCase()
+    if (!VALID_COMFY_TYPES.has(type)) {
+      return { error: `Invalid type "${out.type}" for output "${out.name}". Must be one of: ${[...VALID_COMFY_TYPES].join(', ')}` }
+    }
+    outputs.push({
+      id: crypto.randomUUID(),
+      name: out.name,
+      type: type as ComfyType,
+      tooltip: ''
+    })
+  }
+
+  return { inputs, outputs, executeBody: parsed.executeBody }
+}
+
 export function LLMTab({ node }: LLMTabProps): JSX.Element {
   const { updateNode } = useProjectStore()
   const {
@@ -35,6 +187,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     customInstructions, setLLMGenerating, setActiveEditorTab
   } = useSettingsStore()
 
+  const [editMode, setEditMode] = useState<EditMode>('execute')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [inputValue, setInputValue] = useState('')
   const [generating, setGenerating] = useState(false)
@@ -85,10 +238,13 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     }
   }, [generating])
 
-  const systemPrompt = buildLLMSystemPrompt(node)
+  const baseSystemPrompt = editMode === 'execute'
+    ? buildLLMSystemPrompt(node)
+    : buildFullNodeSystemPrompt(node)
+
   const fullSystemPrompt = customInstructions
-    ? systemPrompt + '\n\n--- Custom Instructions ---\n' + customInstructions
-    : systemPrompt
+    ? baseSystemPrompt + '\n\n--- Custom Instructions ---\n' + customInstructions
+    : baseSystemPrompt
 
   const handleSend = useCallback(async () => {
     const text = inputValue.trim()
@@ -135,6 +291,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
       content: m.content
     }))
 
+    const currentMode = editMode
+
     try {
       const result = await window.electronAPI.generateLLMChat({
         provider: llm.activeProvider,
@@ -151,7 +309,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
         role: 'assistant',
         content: result,
         timestamp: Date.now(),
-        elapsedMs: elapsed
+        elapsedMs: elapsed,
+        mode: currentMode
       }
       setMessages((prev) => [...prev, assistantMsg])
     } catch (e) {
@@ -169,7 +328,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
       setLLMGenerating(false)
       requestIdRef.current = null
     }
-  }, [inputValue, generating, messages, llm.activeProvider, activeConfig, fullSystemPrompt, setLLMGenerating])
+  }, [inputValue, generating, messages, llm.activeProvider, activeConfig, fullSystemPrompt, editMode, setLLMGenerating])
 
   function handleCancel(): void {
     if (requestIdRef.current) {
@@ -178,19 +337,41 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
   }
 
   function handleApply(msg: ChatMessage): void {
-    const code = extractCodeBlock(msg.content) ?? msg.content
-    updateNode(node.id, { executeBody: code })
+    if (msg.mode === 'fullnode') {
+      const result = parseFullNodeResponse(msg.content)
+      if ('error' in result) {
+        setMessages((prev) => [
+          ...prev,
+          { id: generateId(), role: 'error', content: `Apply failed: ${result.error}`, timestamp: Date.now() }
+        ])
+        return
+      }
+      updateNode(node.id, { inputs: result.inputs, outputs: result.outputs, executeBody: result.executeBody })
+    } else {
+      const code = extractCodeBlock(msg.content) ?? msg.content
+      updateNode(node.id, { executeBody: code })
+    }
     setAppliedMessageIds((prev) => new Set(prev).add(msg.id))
   }
 
   function isAlreadyApplied(msg: ChatMessage): boolean {
+    if (appliedMessageIds.has(msg.id)) return true
+    if (msg.mode === 'fullnode') return false
     const code = extractCodeBlock(msg.content) ?? msg.content
     return node.executeBody === code
   }
 
+  const emptyStateText = editMode === 'execute'
+    ? { main: 'Describe what this node should do. The AI will write the execute() method body.', hint: 'Iterate with follow-up messages like "add error handling" or "use numpy instead".' }
+    : { main: 'Describe the inputs, outputs, and logic you want. The AI will redesign the full node.', hint: 'The AI will return JSON with inputs, outputs, and execute body. Review before applying.' }
+
+  const sendPlaceholder = editMode === 'execute'
+    ? 'Describe what this node should do, e.g. "Blend two images using alpha compositing"'
+    : 'Describe the changes, e.g. "Add a mask input and a strength float slider, output a blended image"'
+
   return (
     <div className="flex h-full flex-col">
-      {/* Compact provider/model bar */}
+      {/* Compact provider/model/mode bar */}
       <div className="border-b border-slate-700/50 bg-slate-900/30 px-4 py-2">
         <div className="flex items-center gap-2">
           <div className="flex-1 min-w-0">
@@ -247,7 +428,24 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
               </Select>
             )}
           </div>
+          {/* Mode selector */}
+          <div className="shrink-0">
+            <Select value={editMode} onValueChange={(v) => setEditMode(v as EditMode)}>
+              <SelectTrigger className="h-7 text-xs w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="execute">Execute Body</SelectItem>
+                <SelectItem value="fullnode">Full Node Edit</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+        {editMode === 'fullnode' && (
+          <p className="text-[10px] text-amber-500/80 mt-1.5">
+            Full Node Edit: AI will suggest new inputs, outputs, and code as JSON. Review carefully before applying.
+          </p>
+        )}
       </div>
 
       {/* Collapsible System Prompt */}
@@ -275,12 +473,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
           <div className="flex items-center justify-center h-full text-center px-8">
             <div className="space-y-2">
               <Wand2 className="mx-auto h-8 w-8 text-slate-700" />
-              <p className="text-sm text-slate-500">
-                Describe what this node should do. The AI will write the <code className="font-mono">execute()</code> method body.
-              </p>
-              <p className="text-xs text-slate-600">
-                You can iterate with follow-up messages like "add error handling" or "use numpy instead".
-              </p>
+              <p className="text-sm text-slate-500">{emptyStateText.main}</p>
+              <p className="text-xs text-slate-600">{emptyStateText.hint}</p>
             </div>
           </div>
         )}
@@ -311,7 +505,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
               <p className="text-slate-200 whitespace-pre-wrap">{msg.content}</p>
             ) : (
               <div>
-                <AssistantMessage content={msg.content} />
+                <AssistantMessage content={msg.content} mode={msg.mode} />
                 <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/30">
                   <Button
                     size="sm"
@@ -325,6 +519,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
                   >
                     {isAlreadyApplied(msg) ? (
                       <><Check className="h-3 w-3" /> Applied</>
+                    ) : msg.mode === 'fullnode' ? (
+                      'Apply (Inputs + Outputs + Code)'
                     ) : (
                       'Apply to Node'
                     )}
@@ -333,6 +529,9 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
                     <span className="text-xs text-slate-600 ml-auto">
                       {(msg.elapsedMs / 1000).toFixed(1)}s
                     </span>
+                  )}
+                  {msg.mode === 'fullnode' && !isAlreadyApplied(msg) && (
+                    <span className="text-[10px] text-amber-500/70 ml-1">Full Node</span>
                   )}
                 </div>
               </div>
@@ -376,7 +575,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
               ref={textareaRef}
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
-              placeholder='Describe what this node should do, e.g. "Blend two images using alpha compositing"'
+              placeholder={sendPlaceholder}
               className="resize-none min-h-[2.5rem] max-h-32 text-sm flex-1"
               rows={1}
               onKeyDown={(e) => {
@@ -386,7 +585,6 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
                 }
               }}
               onInput={(e) => {
-                // Auto-resize textarea
                 const target = e.target as HTMLTextAreaElement
                 target.style.height = 'auto'
                 target.style.height = Math.min(target.scrollHeight, 128) + 'px'
@@ -410,7 +608,27 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
 }
 
 /** Renders assistant content with code blocks styled as <pre> */
-function AssistantMessage({ content }: { content: string }): JSX.Element {
+function AssistantMessage({ content, mode }: { content: string; mode?: string }): JSX.Element {
+  // In fullnode mode, render as a JSON code block if it looks like JSON
+  if (mode === 'fullnode') {
+    const jsonStart = content.indexOf('{')
+    const jsonEnd = content.lastIndexOf('}')
+    if (jsonStart !== -1 && jsonEnd > jsonStart) {
+      const before = content.slice(0, jsonStart).trim()
+      const jsonPart = content.slice(jsonStart, jsonEnd + 1)
+      const after = content.slice(jsonEnd + 1).trim()
+      return (
+        <div className="space-y-2">
+          {before && <p className="text-slate-300 whitespace-pre-wrap text-sm">{before}</p>}
+          <pre className="bg-slate-900 rounded p-3 text-xs font-mono text-slate-300 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto">
+            {jsonPart}
+          </pre>
+          {after && <p className="text-slate-300 whitespace-pre-wrap text-sm">{after}</p>}
+        </div>
+      )
+    }
+  }
+
   // Split content into text and code blocks
   const parts: Array<{ type: 'text' | 'code'; content: string; lang?: string }> = []
   const regex = /```(\w*)\s*\n([\s\S]*?)```/g

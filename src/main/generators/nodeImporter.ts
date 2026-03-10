@@ -354,7 +354,25 @@ export function parseNodeFile(source: string, filename: string): ImportedNodeDef
   return nodes
 }
 
-// ─── IPC handler ─────────────────────────────────────────────────────────────
+// ─── IPC handlers ────────────────────────────────────────────────────────────
+
+export async function handleImportNodeFile(): Promise<ImportedNodeDef[]> {
+  const result = await dialog.showOpenDialog({
+    title: 'Select Python Node File to Import',
+    filters: [{ name: 'Python File', extensions: ['py'] }],
+    properties: ['openFile']
+  })
+
+  if (result.canceled || !result.filePaths[0]) return []
+
+  const filePath = result.filePaths[0]
+  try {
+    const source = await fs.readFile(filePath, 'utf-8')
+    return parseNodeFile(source, path.basename(filePath))
+  } catch {
+    return []
+  }
+}
 
 export async function handleImportNodeFolder(): Promise<ImportedNodeDef[]> {
   const result = await dialog.showOpenDialog({

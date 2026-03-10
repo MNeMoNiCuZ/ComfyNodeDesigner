@@ -41,5 +41,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadProjectFromPath: (filePath: string) => ipcRenderer.invoke('file:load-project-path', filePath),
 
   // Import
-  importNodeFolder: () => ipcRenderer.invoke('file:import-node-folder')
+  importNodeFolder: () => ipcRenderer.invoke('file:import-node-folder'),
+  importNodeFile: () => ipcRenderer.invoke('file:import-node-file')
 })

@@ -137,4 +137,4 @@ export async function handleLoadProjectFromPath(
   }
 }
 
-export { handleImportNodeFolder } from '../generators/nodeImporter'
+export { handleImportNodeFolder, handleImportNodeFile } from '../generators/nodeImporter'

@@ -28,6 +28,7 @@ declare global {
 
       loadProjectFromPath: (filePath: string) => Promise<{ project: Project; filePath: string } | null>
       importNodeFolder: () => Promise<any[]>
+      importNodeFile: () => Promise<any[]>
     }
   }
 }
