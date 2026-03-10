@@ -9,6 +9,7 @@ interface ProjectState {
 
   // Project-level actions
   setProject: (project: Project) => void
+  openProject: (project: Project, filePath: string) => void
   setProjectName: (name: string) => void
   newProject: () => void
 
@@ -19,6 +20,7 @@ interface ProjectState {
   duplicateNode: (id: string) => void
   reorderNodes: (fromIndex: number, toIndex: number) => void
   selectNode: (id: string | null) => void
+  importNodes: (nodes: ComfyNodeDef[]) => void
 
   // Persistence
   setDirty: (dirty: boolean) => void
@@ -41,7 +43,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   isDirty: false,
   currentFilePath: null,
 
-  setProject: (project) => set({ project, isDirty: false }),
+  setProject: (project) => set({ project, isDirty: false, selectedNodeId: null }),
+
+  openProject: (project, filePath) => set({ project, isDirty: false, currentFilePath: filePath, selectedNodeId: null }),
 
   setProjectName: (name) =>
     set((state) => ({
@@ -128,6 +132,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     }),
 
   selectNode: (id) => set({ selectedNodeId: id }),
+
+  importNodes: (nodes) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        nodes: [...state.project.nodes, ...nodes],
+        updatedAt: new Date().toISOString()
+      },
+      isDirty: true
+    })),
 
   setDirty: (dirty) => set({ isDirty: dirty }),
 

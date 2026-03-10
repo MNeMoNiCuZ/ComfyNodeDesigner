@@ -124,3 +124,17 @@ export async function handleGetApiKeys(
     return {}
   }
 }
+
+export async function handleLoadProjectFromPath(
+  filePath: string
+): Promise<{ project: Project; filePath: string } | null> {
+  try {
+    const content = await fs.readFile(filePath, 'utf-8')
+    const project = JSON.parse(content) as Project
+    return { project, filePath }
+  } catch {
+    return null
+  }
+}
+
+export { handleImportNodeFolder, handleImportNodeFile } from '../generators/nodeImporter'

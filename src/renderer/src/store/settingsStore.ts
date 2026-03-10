@@ -1,6 +1,12 @@
 import { create } from 'zustand'
 import { type LLMProvider, type LLMSettings, DEFAULT_LLM_SETTINGS } from '../types/llm.types'
 
+interface RecentProject {
+  path: string
+  name: string
+  openedAt: string
+}
+
 interface SettingsState {
   llm: LLMSettings
   theme: 'dark' | 'light'
@@ -9,6 +15,9 @@ interface SettingsState {
   customInstructions: string
   activeEditorTab: string
   llmGenerating: boolean
+  recentProjects: RecentProject[]
+  maxRecentProjects: number
+  recentProjectsEnabled: boolean
 
   setActiveProvider: (provider: LLMProvider) => void
   setProviderModel: (provider: LLMProvider, model: string) => void
@@ -17,14 +26,23 @@ interface SettingsState {
   setCustomInstructions: (instructions: string) => void
   setActiveEditorTab: (tab: string) => void
   setLLMGenerating: (generating: boolean) => void
+  addRecentProject: (path: string, name: string) => void
+  clearRecentProjects: () => void
+  setMaxRecentProjects: (n: number) => void
+  setRecentProjectsEnabled: (enabled: boolean) => void
   loadFromMain: () => Promise<void>
   persistToMain: () => Promise<void>
   fetchOllamaModels: () => Promise<string[]>
 }
 
-function serializableSettings(llm: LLMSettings): Record<string, unknown> {
+function serializableSettings(
+  llm: LLMSettings,
+  extra?: Record<string, unknown>
+): Record<string, unknown> {
   // Strip any undefined values so JSON round-trips cleanly
-  return JSON.parse(JSON.stringify({ activeProvider: llm.activeProvider, providers: llm.providers }))
+  return JSON.parse(
+    JSON.stringify({ activeProvider: llm.activeProvider, providers: llm.providers, ...extra })
+  )
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
@@ -35,6 +53,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   customInstructions: '',
   activeEditorTab: 'identity',
   llmGenerating: false,
+  recentProjects: [],
+  maxRecentProjects: 10,
+  recentProjectsEnabled: true,
 
   setActiveProvider: (provider) => {
     set((state) => ({ llm: { ...state.llm, activeProvider: provider } }))
@@ -74,10 +95,15 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     // Persist custom instructions along with other settings
     const state = get()
     try {
-      window.electronAPI.saveSettings({
-        ...serializableSettings(state.llm),
-        customInstructions: instructions
-      })
+      const s = get()
+      window.electronAPI.saveSettings(
+        serializableSettings(s.llm, {
+          customInstructions: instructions,
+          recentProjects: s.recentProjects,
+          maxRecentProjects: s.maxRecentProjects,
+          recentProjectsEnabled: s.recentProjectsEnabled
+        })
+      )
     } catch {
       // non-fatal
     }
@@ -87,21 +113,66 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setLLMGenerating: (generating) => set({ llmGenerating: generating }),
 
+  addRecentProject: (path, name) => {
+    set((state) => {
+      const filtered = state.recentProjects.filter((p) => p.path !== path)
+      const updated = [{ path, name, openedAt: new Date().toISOString() }, ...filtered].slice(
+        0,
+        state.maxRecentProjects
+      )
+      return { recentProjects: updated }
+    })
+    get().persistToMain()
+  },
+
+  clearRecentProjects: () => {
+    set({ recentProjects: [] })
+    get().persistToMain()
+  },
+
+  setMaxRecentProjects: (n) => {
+    set((state) => ({
+      maxRecentProjects: n,
+      recentProjects: state.recentProjects.slice(0, n)
+    }))
+    get().persistToMain()
+  },
+
+  setRecentProjectsEnabled: (enabled) => {
+    set({ recentProjectsEnabled: enabled })
+    get().persistToMain()
+  },
+
   loadFromMain: async () => {
     try {
       const saved = await window.electronAPI.getSettings()
-      if (saved && saved.activeProvider && saved.providers) {
-        set((state) => ({
-          llm: {
-            ...DEFAULT_LLM_SETTINGS,
-            ...(saved as Partial<LLMSettings>),
-            providers: {
-              ...DEFAULT_LLM_SETTINGS.providers,
-              ...(saved.providers as LLMSettings['providers'])
+      if (saved) {
+        set((state) => {
+          const update: Partial<SettingsState> = {}
+          if (saved.activeProvider && saved.providers) {
+            update.llm = {
+              ...DEFAULT_LLM_SETTINGS,
+              ...(saved as Partial<LLMSettings>),
+              providers: {
+                ...DEFAULT_LLM_SETTINGS.providers,
+                ...(saved.providers as LLMSettings['providers'])
+              }
             }
-          },
-          customInstructions: typeof saved.customInstructions === 'string' ? saved.customInstructions : state.customInstructions
-        }))
+          }
+          if (typeof saved.customInstructions === 'string') {
+            update.customInstructions = saved.customInstructions
+          }
+          if (Array.isArray(saved.recentProjects)) {
+            update.recentProjects = saved.recentProjects as RecentProject[]
+          }
+          if (typeof saved.maxRecentProjects === 'number') {
+            update.maxRecentProjects = saved.maxRecentProjects
+          }
+          if (typeof saved.recentProjectsEnabled === 'boolean') {
+            update.recentProjectsEnabled = saved.recentProjectsEnabled
+          }
+          return { ...state, ...update }
+        })
       }
     } catch {
       // first run — use defaults
@@ -111,10 +182,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   persistToMain: async () => {
     try {
       const state = get()
-      await window.electronAPI.saveSettings({
-        ...serializableSettings(state.llm),
-        customInstructions: state.customInstructions
-      })
+      await window.electronAPI.saveSettings(
+        serializableSettings(state.llm, {
+          customInstructions: state.customInstructions,
+          recentProjects: state.recentProjects,
+          maxRecentProjects: state.maxRecentProjects,
+          recentProjectsEnabled: state.recentProjectsEnabled
+        })
+      )
     } catch {
       // non-fatal
     }

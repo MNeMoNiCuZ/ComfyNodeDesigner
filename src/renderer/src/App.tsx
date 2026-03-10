@@ -41,8 +41,7 @@ class ErrorBoundary extends React.Component<
 }
 
 export default function App(): JSX.Element {
-  const { project, isDirty, addNode, setProject, setCurrentFilePath, currentFilePath } =
-    useProjectStore()
+  const { isDirty } = useProjectStore()
   const { loadFromMain } = useSettingsStore()
 
   // Load settings on startup
@@ -50,7 +49,7 @@ export default function App(): JSX.Element {
     loadFromMain()
   }, [])
 
-  // Keyboard shortcuts
+  // Keyboard shortcuts — read state directly from store to avoid stale closures
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       const isMac = navigator.platform.includes('Mac')
@@ -58,30 +57,35 @@ export default function App(): JSX.Element {
 
       if (mod && e.key === 's') {
         e.preventDefault()
-        document.querySelector<HTMLButtonElement>('[data-save-btn]')?.click()
-        // Fallback: trigger save via store
+        const { project, currentFilePath } = useProjectStore.getState()
         window.electronAPI
           .saveProject(project, currentFilePath ?? undefined)
-          .then((result: { path: string }) => {
-            setCurrentFilePath(result.path)
-            useProjectStore.getState().setDirty(false)
+          .then((result) => {
+            if (result) {
+              useProjectStore.getState().setCurrentFilePath(result.path)
+              useProjectStore.getState().setDirty(false)
+              useSettingsStore.getState().addRecentProject(result.path, project.name)
+            }
           })
           .catch(() => {/* cancelled */})
       } else if (mod && e.key === 'n' && !e.shiftKey) {
         e.preventDefault()
-        if (isDirty && !window.confirm('Unsaved changes. Create new project?')) return
+        if (useProjectStore.getState().isDirty && !window.confirm('Unsaved changes. Create new project?')) return
         useProjectStore.getState().newProject()
       } else if (mod && e.key === 'o') {
         e.preventDefault()
-        window.electronAPI.loadProject().then((loaded: any) => {
+        if (useProjectStore.getState().isDirty) {
+          if (!window.confirm('You have unsaved changes. Open another project anyway?')) return
+        }
+        window.electronAPI.loadProject().then((loaded) => {
           if (loaded) {
-            setProject(loaded)
-            setCurrentFilePath(null)
+            useProjectStore.getState().openProject(loaded.project, loaded.filePath)
+            useSettingsStore.getState().addRecentProject(loaded.filePath, loaded.project.name)
           }
         })
       }
     },
-    [project, isDirty, currentFilePath]
+    []
   )
 
   useEffect(() => {

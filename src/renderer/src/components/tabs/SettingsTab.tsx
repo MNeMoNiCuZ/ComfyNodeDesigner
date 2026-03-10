@@ -6,6 +6,7 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { Textarea } from '../ui/textarea'
+import { Switch } from '../ui/switch'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs'
 import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw } from 'lucide-react'
 import { cn } from '../../lib/utils'
@@ -13,7 +14,21 @@ import { cn } from '../../lib/utils'
 const PROVIDERS: LLMProvider[] = ['openai', 'anthropic', 'google', 'groq', 'xai', 'openrouter', 'ollama']
 
 export function SettingsTab(): JSX.Element {
-  const { llm, setProviderModel, setProviderBaseUrl, ollamaModels, fetchOllamaModels, customInstructions, setCustomInstructions } = useSettingsStore()
+  const {
+    llm,
+    setProviderModel,
+    setProviderBaseUrl,
+    ollamaModels,
+    fetchOllamaModels,
+    customInstructions,
+    setCustomInstructions,
+    recentProjects,
+    recentProjectsEnabled,
+    maxRecentProjects,
+    setRecentProjectsEnabled,
+    setMaxRecentProjects,
+    clearRecentProjects
+  } = useSettingsStore()
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -256,6 +271,51 @@ export function SettingsTab(): JSX.Element {
             placeholder="E.g. Always use numpy for array operations. Prefer explicit error handling over silent failures."
             className="resize-none h-24 text-sm font-mono"
           />
+        </div>
+
+        {/* Recent Projects */}
+        <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-3">
+          <Label className="text-sm font-semibold text-slate-200">Recent Projects</Label>
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-slate-400">Enable recent projects history</span>
+            <Switch
+              checked={recentProjectsEnabled}
+              onCheckedChange={setRecentProjectsEnabled}
+            />
+          </div>
+          {recentProjectsEnabled && (
+            <>
+              <div className="flex items-center gap-3">
+                <Label className="text-xs text-slate-400 shrink-0">Max history count</Label>
+                <Input
+                  type="number"
+                  min={10}
+                  max={100}
+                  step={10}
+                  value={maxRecentProjects}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10)
+                    if (!isNaN(n) && n >= 10 && n <= 100) setMaxRecentProjects(n)
+                  }}
+                  className="w-20 text-sm"
+                />
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">
+                  {recentProjects.length} project{recentProjects.length !== 1 ? 's' : ''} in history
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-slate-700 text-xs"
+                  onClick={clearRecentProjects}
+                  disabled={recentProjects.length === 0}
+                >
+                  Clear History
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

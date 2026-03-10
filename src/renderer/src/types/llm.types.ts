@@ -32,6 +32,7 @@ export interface ChatMessage {
   content: string
   timestamp: number
   elapsedMs?: number
+  mode?: 'execute' | 'fullnode'
 }
 
 export interface LLMChatRequest {
