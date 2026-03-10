@@ -19,7 +19,10 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  Code2
+  Code2,
+  Trash2,
+  Eye,
+  EyeOff
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -637,13 +640,29 @@ function DiffRow({ label, oldVal, newVal }: { label: string; oldVal: unknown; ne
 function AssistantMessage({
   content,
   mode,
-  node
+  node,
+  messageId,
+  pendingProposal,
+  onSetPendingProposal
 }: {
   content: string
   mode?: EditMode
   node?: ComfyNodeDef
+  messageId?: string
+  pendingProposal?: { nodeId: string; messageId: string; operations: any[] } | null
+  onSetPendingProposal?: (proposal: { nodeId: string; messageId: string; operations: any[] } | null) => void
 }): JSX.Element {
   const [rawJsonOpen, setRawJsonOpen] = useState(false)
+  const [expandedOps, setExpandedOps] = useState<Set<number>>(new Set())
+
+  function toggleOpExpand(i: number): void {
+    setExpandedOps((prev) => {
+      const next = new Set(prev)
+      if (next.has(i)) next.delete(i)
+      else next.add(i)
+      return next
+    })
+  }
 
   // Functionality Edit mode: parse and display operations summary with diffs
   if (mode === 'execute') {
@@ -652,13 +671,23 @@ function AssistantMessage({
       try {
         const parsed = JSON.parse(jsonStr)
         if (Array.isArray(parsed.operations)) {
+          const isThisPreview = pendingProposal?.messageId === messageId
           return (
             <div className="space-y-2">
               <div className="text-sm text-slate-300">
                 <p className="font-medium text-slate-200 mb-1">Proposed changes:</p>
-                <ul className="list-disc list-inside space-y-1 text-slate-400">
+                <ul className="list-none space-y-1 text-slate-400">
                   {parsed.operations.map((op: any, i: number) => (
                     <li key={i} className="text-xs">
+                      <div className="flex items-start gap-1">
+                        <button
+                          className="mt-0.5 shrink-0 text-slate-600 hover:text-slate-400"
+                          onClick={() => toggleOpExpand(i)}
+                          title={expandedOps.has(i) ? 'Collapse' : 'Expand JSON'}
+                        >
+                          {expandedOps.has(i) ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                        </button>
+                        <span className="flex-1">
                       {(() => {
                         switch (op.op) {
                           case 'add_input':
@@ -751,10 +780,40 @@ function AssistantMessage({
                             return <span className="text-slate-600">Unknown operation: {op.op}</span>
                         }
                       })()}
+                        </span>
+                      </div>
+                      {expandedOps.has(i) && (
+                        <pre className="mt-1 ml-4 bg-slate-900 rounded p-2 text-[10px] font-mono text-slate-400 overflow-x-auto whitespace-pre-wrap max-h-32 overflow-y-auto">
+                          {JSON.stringify(op, null, 2)}
+                        </pre>
+                      )}
                     </li>
                   ))}
                 </ul>
               </div>
+              {node && onSetPendingProposal && messageId && (
+                <div className="flex items-center gap-2">
+                  <button
+                    className={cn(
+                      'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded transition-colors',
+                      isThisPreview
+                        ? 'text-blue-300 bg-blue-900/40 hover:bg-blue-900/60'
+                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
+                    )}
+                    onClick={() => {
+                      if (isThisPreview) {
+                        onSetPendingProposal(null)
+                      } else {
+                        onSetPendingProposal({ nodeId: node.id, messageId, operations: parsed.operations })
+                      }
+                    }}
+                    title={isThisPreview ? 'Clear preview from Inputs/Outputs tabs' : 'Preview changes in Inputs/Outputs tabs'}
+                  >
+                    {isThisPreview ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                    {isThisPreview ? 'Clear Preview' : 'Preview in Tabs'}
+                  </button>
+                </div>
+              )}
               <div>
                 <button
                   className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300"
@@ -865,7 +924,13 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     getEffectiveInstructions,
     setLLMGenerating,
     setActiveEditorTab,
-    customModels
+    customModels,
+    chatHistories,
+    setChatHistory,
+    clearChatHistory,
+    contextMessageCount,
+    pendingProposal,
+    setPendingProposal
   } = useSettingsStore()
 
   const [editMode, setEditMode] = useState<EditMode>('execute')
@@ -882,12 +947,24 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const isLoadingRef = useRef(false)
 
   const activeConfig = llm.providers[llm.activeProvider]
 
   // Current messages based on active mode
   const messages = editMode === 'execute' ? executeMessages : fullnodeMessages
   const setMessages = editMode === 'execute' ? setExecuteMessages : setFullnodeMessages
+
+  // Load chat history from store when node changes
+  useEffect(() => {
+    isLoadingRef.current = true
+    const history = chatHistories[node.id]
+    setExecuteMessages(history?.execute ?? [])
+    setFullnodeMessages(history?.fullnode ?? [])
+    setPendingProposal(null)
+    const t = setTimeout(() => { isLoadingRef.current = false }, 0)
+    return () => clearTimeout(t)
+  }, [node.id]) // intentionally excludes chatHistories to avoid loops
 
   // Auto-fetch Ollama models when Ollama is selected
   useEffect(() => {
@@ -948,7 +1025,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
             id: generateId(),
             role: 'error',
             content: `No API key configured for ${PROVIDER_LABELS[llm.activeProvider]}. Go to the Settings tab to add your API key.`,
-            timestamp: Date.now()
+            timestamp: Date.now(),
+            nodeId: node.id
           }
           setMessages((prev) => [...prev, errorMsg])
           return
@@ -963,10 +1041,20 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
       role: 'user',
       content: text,
       timestamp: Date.now(),
-      mode: editMode
+      mode: editMode,
+      nodeId: node.id
     }
 
-    setMessages((prev) => [...prev, userMsg])
+    const currentNodeId = node.id
+    const currentMode = editMode
+
+    setMessages((prev) => {
+      const updated = [...prev, userMsg]
+      if (!isLoadingRef.current) {
+        setChatHistory(currentNodeId, currentMode, updated)
+      }
+      return updated
+    })
     setInputValue('')
     setGenerating(true)
     setLLMGenerating(true)
@@ -974,14 +1062,14 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     const reqId = generateId()
     requestIdRef.current = reqId
 
-    // Build multi-turn messages for the API
+    // Build multi-turn messages for the API with context limit
     const allMessages = [...messages.filter((m) => m.role !== 'error'), userMsg]
-    const apiMessages = allMessages.map((m) => ({
+    const limit = Math.max(1, contextMessageCount)
+    const contextMessages = contextMessageCount === 0 ? [userMsg] : allMessages.slice(-limit)
+    const apiMessages = contextMessages.map((m) => ({
       role: m.role as 'user' | 'assistant',
       content: m.content
     }))
-
-    const currentMode = editMode
 
     try {
       const result = await window.electronAPI.generateLLMChat({
@@ -1000,13 +1088,22 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
         content: result,
         timestamp: Date.now(),
         elapsedMs: elapsed,
-        mode: currentMode
+        mode: currentMode,
+        nodeId: currentNodeId
       }
 
       if (currentMode === 'execute') {
-        setExecuteMessages((prev) => [...prev, assistantMsg])
+        setExecuteMessages((prev) => {
+          const updated = [...prev, assistantMsg]
+          setChatHistory(currentNodeId, 'execute', updated)
+          return updated
+        })
       } else {
-        setFullnodeMessages((prev) => [...prev, assistantMsg])
+        setFullnodeMessages((prev) => {
+          const updated = [...prev, assistantMsg]
+          setChatHistory(currentNodeId, 'fullnode', updated)
+          return updated
+        })
       }
     } catch (e) {
       const errMessage = (e as Error).message ?? String(e)
@@ -1015,7 +1112,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
         id: generateId(),
         role: 'error',
         content: isAborted ? 'Generation cancelled.' : errMessage,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        nodeId: currentNodeId
       }
       if (currentMode === 'execute') {
         setExecuteMessages((prev) => [...prev, errorMsg])
@@ -1036,7 +1134,10 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     fullSystemPrompt,
     editMode,
     setLLMGenerating,
-    setMessages
+    setMessages,
+    setChatHistory,
+    contextMessageCount,
+    node.id
   ])
 
   function handleCancel(): void {
@@ -1046,6 +1147,20 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
   }
 
   function handleApply(msg: ChatMessage): void {
+    // Guard: don't apply a response that was generated for a different node
+    if (msg.nodeId && msg.nodeId !== node.id) {
+      const setter = msg.mode === 'fullnode' ? setFullnodeMessages : setExecuteMessages
+      setter((prev) => [
+        ...prev,
+        {
+          id: generateId(),
+          role: 'error' as const,
+          content: `Warning: this response was generated for a different node. Switch back to that node before applying.`,
+          timestamp: Date.now()
+        }
+      ])
+      return
+    }
     if (msg.mode === 'fullnode') {
       const result = parseFullCodeResponse(msg.content, node)
       if ('error' in result) {
@@ -1213,6 +1328,19 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
               </Select>
             )}
           </div>
+          {/* Clear history button */}
+          <button
+            onClick={() => {
+              clearChatHistory(node.id)
+              setExecuteMessages([])
+              setFullnodeMessages([])
+              setPendingProposal(null)
+            }}
+            className="shrink-0 rounded p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-700/60 transition-colors"
+            title="Clear chat history for this node"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
         </div>
       </div>
 
@@ -1313,7 +1441,14 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
               <p className="text-slate-200 whitespace-pre-wrap">{msg.content}</p>
             ) : (
               <div>
-                <AssistantMessage content={msg.content} mode={msg.mode} node={node} />
+                <AssistantMessage
+                  content={msg.content}
+                  mode={msg.mode}
+                  node={node}
+                  messageId={msg.id}
+                  pendingProposal={pendingProposal}
+                  onSetPendingProposal={setPendingProposal}
+                />
                 <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/30">
                   <Button
                     size="sm"

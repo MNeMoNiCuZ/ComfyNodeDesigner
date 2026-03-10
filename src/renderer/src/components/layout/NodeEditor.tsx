@@ -183,7 +183,7 @@ export function NodeEditor(): JSX.Element {
             <NodePreviewTab node={selectedNode} />
           </TabsContent>
           <TabsContent value="code" className="h-full m-0 overflow-hidden">
-            <PreviewTab />
+            <PreviewTab node={selectedNode} />
           </TabsContent>
           <TabsContent value="settings" className="h-full m-0 overflow-hidden">
             <SettingsTab />

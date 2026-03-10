@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { type LLMProvider, type LLMSettings, DEFAULT_LLM_SETTINGS } from '../types/llm.types'
+import { type LLMProvider, type LLMSettings, DEFAULT_LLM_SETTINGS, type ChatMessage } from '../types/llm.types'
 
 interface RecentProject {
   path: string
@@ -23,6 +23,9 @@ interface SettingsState {
   maxRecentProjects: number
   recentProjectsEnabled: boolean
   customModels: Partial<Record<LLMProvider, string[]>>
+  chatHistories: Record<string, { execute: ChatMessage[]; fullnode: ChatMessage[] }>
+  contextMessageCount: number
+  pendingProposal: { nodeId: string; messageId: string; operations: any[] } | null
 
   setActiveProvider: (provider: LLMProvider) => void
   setProviderModel: (provider: LLMProvider, model: string) => void
@@ -43,6 +46,10 @@ interface SettingsState {
   setRecentProjectsEnabled: (enabled: boolean) => void
   addCustomModel: (provider: LLMProvider, model: string) => void
   removeCustomModel: (provider: LLMProvider, model: string) => void
+  setChatHistory: (nodeId: string, mode: 'execute' | 'fullnode', messages: ChatMessage[]) => void
+  clearChatHistory: (nodeId: string) => void
+  setContextMessageCount: (n: number) => void
+  setPendingProposal: (proposal: { nodeId: string; messageId: string; operations: any[] } | null) => void
   loadFromMain: () => Promise<void>
   persistToMain: () => Promise<void>
   fetchOllamaModels: () => Promise<string[]>
@@ -57,6 +64,7 @@ function serializableSettings(
     JSON.stringify({ activeProvider: llm.activeProvider, providers: llm.providers, ...extra })
   )
 }
+
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   llm: DEFAULT_LLM_SETTINGS,
@@ -74,6 +82,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   maxRecentProjects: 10,
   recentProjectsEnabled: true,
   customModels: {},
+  chatHistories: {},
+  contextMessageCount: 10,
+  pendingProposal: null,
 
   setActiveProvider: (provider) => {
     set((state) => ({ llm: { ...state.llm, activeProvider: provider } }))
@@ -214,6 +225,37 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     get().persistToMain()
   },
 
+  setChatHistory: (nodeId, mode, messages) => {
+    set((state) => ({
+      chatHistories: {
+        ...state.chatHistories,
+        [nodeId]: {
+          ...(state.chatHistories[nodeId] ?? { execute: [], fullnode: [] }),
+          [mode]: messages
+        }
+      }
+    }))
+    get().persistToMain()
+  },
+
+  clearChatHistory: (nodeId) => {
+    set((state) => {
+      const histories = { ...state.chatHistories }
+      delete histories[nodeId]
+      return { chatHistories: histories }
+    })
+    get().persistToMain()
+  },
+
+  setContextMessageCount: (n) => {
+    set({ contextMessageCount: n })
+    get().persistToMain()
+  },
+
+  setPendingProposal: (proposal) => {
+    set({ pendingProposal: proposal })
+  },
+
   loadFromMain: async () => {
     try {
       const saved = await window.electronAPI.getSettings()
@@ -257,6 +299,12 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           if (saved.customModels && typeof saved.customModels === 'object') {
             update.customModels = saved.customModels as Partial<Record<LLMProvider, string[]>>
           }
+          if (saved.chatHistories && typeof saved.chatHistories === 'object') {
+            update.chatHistories = saved.chatHistories as Record<string, { execute: ChatMessage[]; fullnode: ChatMessage[] }>
+          }
+          if (typeof saved.contextMessageCount === 'number') {
+            update.contextMessageCount = saved.contextMessageCount
+          }
           return { ...state, ...update }
         })
       }
@@ -278,7 +326,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           recentProjects: state.recentProjects,
           maxRecentProjects: state.maxRecentProjects,
           recentProjectsEnabled: state.recentProjectsEnabled,
-          customModels: state.customModels
+          customModels: state.customModels,
+          chatHistories: state.chatHistories,
+          contextMessageCount: state.contextMessageCount
         })
       )
     } catch {

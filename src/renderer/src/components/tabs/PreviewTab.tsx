@@ -5,20 +5,31 @@ import { generateAllFiles } from '../../../../main/generators/codeGenerator'
 import { Button } from '../ui/button'
 import { Copy, Check, Download } from 'lucide-react'
 import { ExportModal } from '../modals/ExportModal'
+import type { ComfyNodeDef } from '../../types/node.types'
+
+interface PreviewTabProps {
+  node?: ComfyNodeDef | null
+}
 
 type ViewMode = 'single' | 'nodes_py' | 'init_py'
 
-export function PreviewTab(): JSX.Element {
+export function PreviewTab({ node }: PreviewTabProps = {}): JSX.Element {
   const { project } = useProjectStore()
   const [mode, setMode] = useState<ViewMode>('single')
   const [copied, setCopied] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [showAllNodes, setShowAllNodes] = useState(false)
 
   const sanitizedName = project.name.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
 
+  const nodesToGenerate = useMemo(() => {
+    if (!node || showAllNodes) return project.nodes
+    return [node]
+  }, [node, showAllNodes, project.nodes])
+
   const files = useMemo(
-    () => generateAllFiles(project.nodes, project.name),
-    [project.nodes, project.name]
+    () => generateAllFiles(nodesToGenerate, project.name),
+    [nodesToGenerate, project.name]
   )
 
   const code =
@@ -28,9 +39,12 @@ export function PreviewTab(): JSX.Element {
         ? files.nodesPy
         : files.initPy
 
+  const nodeName = node ? node.internalName || node.displayName : null
   const fileLabel =
     mode === 'single'
-      ? `${sanitizedName}.py`
+      ? node && !showAllNodes
+        ? `${nodeName}.py`
+        : `${sanitizedName}.py`
       : mode === 'nodes_py'
         ? `${sanitizedName}/nodes/${sanitizedName}_nodes.py`
         : `${sanitizedName}/__init__.py`
@@ -67,13 +81,26 @@ export function PreviewTab(): JSX.Element {
           ))}
         </div>
 
+        {node && (
+          <button
+            onClick={() => setShowAllNodes(!showAllNodes)}
+            className={`px-3 py-1.5 text-xs font-medium rounded border transition-colors ${
+              showAllNodes
+                ? 'border-slate-700 text-slate-400 hover:text-white hover:border-slate-600'
+                : 'bg-blue-600/30 text-blue-300 border-blue-500/50 hover:bg-blue-600/50'
+            }`}
+          >
+            {showAllNodes ? 'All Nodes' : 'Current Node'}
+          </button>
+        )}
+
         <span className="text-xs text-slate-500 font-mono truncate">{fileLabel}</span>
 
         <div className="flex-1" />
 
         <div className="flex items-center gap-1">
           <span className="text-xs text-muted-foreground">
-            {project.nodes.length} node{project.nodes.length !== 1 ? 's' : ''}
+            {nodesToGenerate.length} node{nodesToGenerate.length !== 1 ? 's' : ''}
           </span>
           <Button
             variant="ghost"

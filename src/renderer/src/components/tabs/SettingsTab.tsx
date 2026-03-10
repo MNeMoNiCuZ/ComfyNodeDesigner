@@ -1,15 +1,17 @@
 import React, { useState, useEffect } from 'react'
 import { useSettingsStore } from '../../store/settingsStore'
+import { useSelectedNode } from '../../store/projectStore'
 import type { LLMProvider } from '../../types/llm.types'
 import { PROVIDER_LABELS, DEFAULT_MODELS } from '../../types/llm.types'
 import { COMFY_TYPE_INFO, getTypeHex } from '../../lib/comfyTypes'
 import type { ComfyType } from '../../types/node.types'
+import { buildLLMSystemPrompt } from '../../../../main/generators/codeGenerator'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { Textarea } from '../ui/textarea'
 import { Switch } from '../ui/switch'
-import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw, X, Plus } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw, X, Plus, ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 const PROVIDERS: LLMProvider[] = ['openai', 'anthropic', 'google', 'groq', 'xai', 'openrouter', 'ollama']
@@ -411,6 +413,14 @@ function ColorSwatchRow({ typeInfo }: { typeInfo: typeof COMFY_TYPE_INFO[number]
       <span className="text-xs font-mono text-slate-300 w-36 shrink-0">{typeInfo.label}</span>
       {/* Type key */}
       <span className="text-[10px] font-mono text-slate-500 w-28 shrink-0">{typeInfo.type}</span>
+      {/* Native color picker */}
+      <input
+        type="color"
+        value={effectiveHex}
+        onChange={(e) => handleHexChange(e.target.value)}
+        className="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-600 bg-transparent p-0.5"
+        title="Pick color"
+      />
       {/* Hex input */}
       <Input
         value={inputValue}
@@ -467,12 +477,36 @@ function AIAssistantSubTab(): JSX.Element {
     setProviderInstruction,
     modelInstructions,
     setModelInstruction,
-    llm
+    llm,
+    contextMessageCount,
+    setContextMessageCount
   } = useSettingsStore()
+  const selectedNode = useSelectedNode()
   const [newModelKey, setNewModelKey] = useState('')
+  const [systemPromptOpen, setSystemPromptOpen] = useState(false)
 
   return (
     <div className="space-y-4">
+      {/* Context History */}
+      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-3">
+        <Label className="text-sm font-semibold text-slate-200">Context History</Label>
+        <p className="text-xs text-muted-foreground">How many recent messages to include in each AI request for multi-turn context.</p>
+        <div className="flex items-center gap-3">
+          <Input
+            type="number"
+            min={0}
+            max={50}
+            value={contextMessageCount}
+            onChange={(e) => {
+              const n = parseInt(e.target.value, 10)
+              if (!isNaN(n) && n >= 0 && n <= 50) setContextMessageCount(n)
+            }}
+            className="w-20"
+          />
+          <span className="text-xs text-slate-500">messages (0 = current message only)</span>
+        </div>
+      </div>
+
       <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-4">
         <div>
           <Label className="text-sm font-semibold text-slate-200">Custom AI Instructions</Label>
@@ -584,6 +618,28 @@ function AIAssistantSubTab(): JSX.Element {
                 <Plus className="h-3 w-3" /> Add
               </Button>
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* System Prompt Preview */}
+      <div className="rounded-lg border border-slate-700 bg-slate-800/30">
+        <button
+          className="flex items-center gap-1.5 px-4 py-3 text-xs text-slate-400 hover:text-slate-200 w-full text-left font-medium"
+          onClick={() => setSystemPromptOpen(!systemPromptOpen)}
+        >
+          {systemPromptOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+          System Prompt Preview
+        </button>
+        {systemPromptOpen && (
+          <div className="px-4 pb-4">
+            {selectedNode ? (
+              <pre className="text-xs text-slate-500 whitespace-pre-wrap max-h-60 overflow-y-auto bg-slate-900/50 rounded p-2 font-mono">
+                {buildLLMSystemPrompt(selectedNode)}
+              </pre>
+            ) : (
+              <p className="text-xs text-slate-600 italic">Select a node to preview the system prompt.</p>
+            )}
           </div>
         )}
       </div>
