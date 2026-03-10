@@ -1,15 +1,19 @@
-import React, { useState } from 'react'
+import React, { useState, useRef, useCallback } from 'react'
 import { useProjectStore } from '../../store/projectStore'
 import { Button } from '../ui/button'
-import { Plus, Trash2, Copy, GripVertical, Box } from 'lucide-react'
+import { Plus, Trash2, Copy, GripVertical, Box, Package } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
 
 export function NodePanel(): JSX.Element {
-  const { project, selectedNodeId, addNode, deleteNode, duplicateNode, selectNode, reorderNodes } =
+  const { project, selectedNodeId, packSelected, addNode, deleteNode, duplicateNode, selectNode, selectPack, reorderNodes } =
     useProjectStore()
   const [dragging, setDragging] = useState<number | null>(null)
   const [dragOver, setDragOver] = useState<number | null>(null)
+  const [sidebarWidth, setSidebarWidth] = useState(270)
+  const isResizing = useRef(false)
+  const startX = useRef(0)
+  const startWidth = useRef(270)
 
   const nodes = project.nodes
 
@@ -30,8 +34,34 @@ export function NodePanel(): JSX.Element {
     setDragOver(null)
   }
 
+  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isResizing.current = true
+    startX.current = e.clientX
+    startWidth.current = sidebarWidth
+
+    const onMouseMove = (ev: MouseEvent): void => {
+      if (!isResizing.current) return
+      const delta = ev.clientX - startX.current
+      const newWidth = Math.max(160, Math.min(480, startWidth.current + delta))
+      setSidebarWidth(newWidth)
+    }
+
+    const onMouseUp = (): void => {
+      isResizing.current = false
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+  }, [sidebarWidth])
+
   return (
-    <div className="flex h-full flex-col border-r border-slate-700/50 bg-slate-900/50 w-56 shrink-0">
+    <div
+      className="flex h-full flex-col border-r border-slate-700/50 bg-slate-900/50 shrink-0 relative"
+      style={{ width: sidebarWidth }}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/50">
         <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Nodes</span>
@@ -52,8 +82,24 @@ export function NodePanel(): JSX.Element {
 
       {/* Node list */}
       <div className="flex-1 overflow-y-auto py-1">
+        {/* Pack row — always at the top */}
+        <div
+          className={cn(
+            'flex items-center gap-2 px-2 py-2 cursor-pointer select-none transition-colors mx-1 rounded-md border mb-1',
+            packSelected
+              ? 'bg-blue-600/20 border-blue-600/40 text-blue-300'
+              : 'border-slate-700/40 text-slate-400 hover:bg-slate-800 hover:text-slate-300'
+          )}
+          onClick={selectPack}
+        >
+          <Package className="h-3.5 w-3.5 shrink-0" />
+          <span className="flex-1 truncate text-xs font-semibold" title={project.packName}>
+            {project.packName ?? 'My_Node_Pack'}
+          </span>
+        </div>
+
         {nodes.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full gap-3 px-4 text-center">
+          <div className="flex flex-col items-center justify-center py-8 gap-3 px-4 text-center">
             <Box className="h-8 w-8 text-slate-600" />
             <p className="text-xs text-slate-500">No nodes yet.</p>
             <Button
@@ -134,6 +180,13 @@ export function NodePanel(): JSX.Element {
           Add Node
         </Button>
       </div>
+
+      {/* Resize handle on right edge */}
+      <div
+        className="absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-blue-500/40 transition-colors"
+        onMouseDown={handleResizeMouseDown}
+        style={{ width: 4 }}
+      />
     </div>
   )
 }

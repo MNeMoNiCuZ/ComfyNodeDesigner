@@ -10,11 +10,12 @@ import { LLMTab } from '../tabs/LLMTab'
 import { PreviewTab } from '../tabs/PreviewTab'
 import { NodePreviewTab } from '../tabs/NodePreviewTab'
 import { SettingsTab } from '../tabs/SettingsTab'
+import { PackTab } from '../tabs/PackTab'
 import { Box, Plus, Settings } from 'lucide-react'
 import { Button } from '../ui/button'
 
 const NODE_TABS = [
-  { value: 'identity', label: 'Identity' },
+  { value: 'identity', label: 'Node Settings' },
   { value: 'inputs', label: 'Inputs' },
   { value: 'outputs', label: 'Outputs' },
   { value: 'advanced', label: 'Advanced' },
@@ -24,9 +25,39 @@ const NODE_TABS = [
 ]
 
 export function NodeEditor(): JSX.Element {
-  const { addNode } = useProjectStore()
+  const { addNode, packSelected } = useProjectStore()
   const selectedNode = useSelectedNode()
   const { activeEditorTab, setActiveEditorTab, llmGenerating } = useSettingsStore()
+
+  // When pack is selected, show PackTab (with Settings accessible)
+  if (packSelected && !selectedNode) {
+    const isSettings = activeEditorTab === 'settings'
+    return (
+      <div className="flex flex-1 flex-col overflow-hidden bg-slate-950">
+        <div className="border-b border-slate-700/50 px-4 pt-3 pb-0 bg-slate-900/50">
+          <div className="flex items-center">
+            <button
+              className={`flex items-center gap-1.5 rounded-t-md border-b-2 px-4 py-2 text-sm font-medium ${!isSettings ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+              onClick={() => setActiveEditorTab('pack')}
+            >
+              Pack
+            </button>
+            <div className="flex-1" />
+            <button
+              className={`flex items-center gap-1.5 rounded-t-md border-b-2 px-4 py-2 text-sm ${isSettings ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-slate-200'}`}
+              onClick={() => setActiveEditorTab('settings')}
+            >
+              <Settings className="h-3.5 w-3.5" />
+              Settings
+            </button>
+          </div>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          {isSettings ? <SettingsTab /> : <PackTab />}
+        </div>
+      </div>
+    )
+  }
 
   // When no node is selected, only allow Settings tab
   if (!selectedNode) {
@@ -145,10 +176,8 @@ export function NodeEditor(): JSX.Element {
             <AdvancedTab node={selectedNode} />
           </TabsContent>
           {/* forceMount LLM tab so chat state persists across tab switches */}
-          <TabsContent value="llm" className="h-full m-0 overflow-hidden" forceMount>
-            <div className={effectiveTab !== 'llm' ? 'hidden' : 'h-full'}>
-              <LLMTab node={selectedNode} />
-            </div>
+          <TabsContent value="llm" className="h-full m-0 overflow-hidden data-[state=inactive]:hidden" forceMount>
+            <LLMTab node={selectedNode} />
           </TabsContent>
           <TabsContent value="preview" className="h-full m-0 overflow-hidden">
             <NodePreviewTab node={selectedNode} />

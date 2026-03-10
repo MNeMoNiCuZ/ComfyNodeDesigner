@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { createContext, useContext } from 'react'
 import type { ComfyNodeDef, NodeInput, NodeOutput, ComfyType } from '../../types/node.types'
-import { getTypeInfo } from '../../lib/comfyTypes'
+import { getTypeInfo, getTypeHex } from '../../lib/comfyTypes'
+import { useSettingsStore } from '../../store/settingsStore'
 import {
   Tooltip,
   TooltipContent,
@@ -12,36 +13,12 @@ interface NodePreviewTabProps {
   node: ComfyNodeDef
 }
 
-// Hex colors for connector dots — hardcoded so Tailwind purge doesn't strip them
-const TYPE_HEX: Record<string, string> = {
-  IMAGE: '#a855f7',
-  LATENT: '#ec4899',
-  CONDITIONING: '#f97316',
-  MODEL: '#3b82f6',
-  VAE: '#ef4444',
-  CLIP: '#eab308',
-  MASK: '#22c55e',
-  CONTROL_NET: '#14b8a6',
-  STYLE_MODEL: '#6366f1',
-  CLIP_VISION: '#f59e0b',
-  CLIP_VISION_OUTPUT: '#fcd34d',
-  UPSCALE_MODEL: '#84cc16',
-  SAMPLER: '#06b6d4',
-  SIGMAS: '#8b5cf6',
-  GUIDER: '#d946ef',
-  NOISE: '#94a3b8',
-  GLIGEN: '#f43f5e',
-  AUDIO: '#10b981',
-  INT: '#0ea5e9',
-  FLOAT: '#38bdf8',
-  STRING: '#34d399',
-  BOOLEAN: '#fde047',
-  COMBO: '#fb923c',
-  '*': '#9ca3af',
-}
+// Context to pass color overrides through the component tree
+const ColorOverridesContext = createContext<Record<string, string>>({})
 
-function typeColor(type: ComfyType): string {
-  return TYPE_HEX[type] ?? TYPE_HEX['*']
+function useTypeColor(type: ComfyType): string {
+  const overrides = useContext(ColorOverridesContext)
+  return getTypeHex(type, overrides)
 }
 
 function isWidget(input: NodeInput): boolean {
@@ -54,8 +31,8 @@ interface ConnectorDotProps {
   side: 'left' | 'right'
 }
 
-function ConnectorDot({ type, side }: ConnectorDotProps): JSX.Element {
-  const color = typeColor(type)
+function ConnectorDot({ type }: ConnectorDotProps): JSX.Element {
+  const color = useTypeColor(type)
   return (
     <div
       className="h-3 w-3 rounded-sm border-2 shrink-0"
@@ -75,12 +52,7 @@ interface SocketRowProps {
 
 function SocketInputRow({ input }: SocketRowProps): JSX.Element {
   const info = getTypeInfo(input.type)
-  const color = typeColor(input.type)
-  const tooltipText = [
-    info.label,
-    info.description,
-    input.tooltip && `ℹ ${input.tooltip}`
-  ].filter(Boolean).join('\n')
+  const color = useTypeColor(input.type)
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -221,7 +193,7 @@ interface OutputRowProps {
 
 function OutputRow({ output }: OutputRowProps): JSX.Element {
   const info = getTypeInfo(output.type)
-  const color = typeColor(output.type)
+  const color = useTypeColor(output.type)
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -253,141 +225,144 @@ function OutputRow({ output }: OutputRowProps): JSX.Element {
 }
 
 export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
+  const { typeColorOverrides } = useSettingsStore()
   const socketInputs = node.inputs.filter((i) => !isWidget(i))
   const widgetInputs = node.inputs.filter((i) => isWidget(i))
-  const maxSideRows = Math.max(socketInputs.length, node.outputs.length)
 
   return (
-    <div className="h-full overflow-auto bg-slate-950 flex flex-col items-center justify-start pt-12 pb-12 px-4">
-      <div className="text-xs text-slate-600 mb-6 text-center">
-        Visual preview — hover inputs/outputs for details
-      </div>
+    <ColorOverridesContext.Provider value={typeColorOverrides}>
+      <div className="h-full overflow-auto bg-slate-950 flex flex-col items-center justify-start pt-12 pb-12 px-4">
+        <div className="text-xs text-slate-600 mb-6 text-center">
+          Visual preview — hover inputs/outputs for details
+        </div>
 
-      {/* Node card */}
-      <div
-        className="rounded-lg overflow-hidden shadow-2xl"
-        style={{
-          minWidth: 280,
-          maxWidth: 480,
-          width: '100%',
-          background: '#1a1a2e',
-          border: '1px solid #2d2d4a'
-        }}
-      >
-        {/* Title bar */}
+        {/* Node card */}
         <div
-          className="px-3 py-2 flex items-center gap-2"
-          style={{ background: '#252540', borderBottom: '1px solid #2d2d4a' }}
+          className="rounded-lg overflow-hidden shadow-2xl"
+          style={{
+            minWidth: 280,
+            maxWidth: 480,
+            width: '100%',
+            background: '#1a1a2e',
+            border: '1px solid #2d2d4a'
+          }}
         >
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-semibold text-slate-100 truncate">
-              {node.displayName || node.internalName}
-            </div>
-            <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
-              {node.category}
-            </div>
-          </div>
-          <div className="flex items-center gap-1 shrink-0">
-            {node.isOutputNode && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-400 border border-amber-700/50 font-medium">
-                OUTPUT
-              </span>
-            )}
-            {node.isInputNode && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-900/60 text-green-400 border border-green-700/50 font-medium">
-                INPUT
-              </span>
-            )}
-          </div>
-        </div>
-
-        {/* Node body */}
-        <div style={{ background: '#1e1e30' }}>
-          {/* Description */}
-          {node.description && (
-            <div
-              className="px-3 py-1.5 text-[10px] text-slate-500 italic"
-              style={{ borderBottom: '1px solid #2a2a40' }}
-            >
-              {node.description}
-            </div>
-          )}
-
-          {/* Socket connections — left inputs, right outputs side by side */}
-          {(socketInputs.length > 0 || node.outputs.length > 0) && (
-            <div className="flex">
-              {/* Left: socket inputs */}
-              <div className="flex-1 py-1 pr-2 pl-0">
-                {socketInputs.map((input) => (
-                  <SocketInputRow key={input.id} input={input} />
-                ))}
-                {/* Pad to match output row count */}
-                {Array.from({ length: Math.max(0, node.outputs.length - socketInputs.length) }).map((_, i) => (
-                  <div key={`pad-${i}`} className="py-1 h-6" />
-                ))}
+          {/* Title bar */}
+          <div
+            className="px-3 py-2 flex items-center gap-2"
+            style={{ background: '#252540', borderBottom: '1px solid #2d2d4a' }}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-slate-100 truncate">
+                {node.displayName || node.internalName}
               </div>
-
-              {/* Divider */}
-              {socketInputs.length > 0 && node.outputs.length > 0 && (
-                <div style={{ width: 1, background: '#2d2d4a' }} />
+              <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
+                {node.category}
+              </div>
+            </div>
+            <div className="flex items-center gap-1 shrink-0">
+              {node.isOutputNode && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-400 border border-amber-700/50 font-medium">
+                  OUTPUT
+                </span>
               )}
+              {node.isInputNode && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-900/60 text-green-400 border border-green-700/50 font-medium">
+                  INPUT
+                </span>
+              )}
+            </div>
+          </div>
 
-              {/* Right: outputs */}
-              <div className="flex-1 py-1 pl-2 pr-0">
-                {node.outputs.map((output) => (
-                  <OutputRow key={output.id} output={output} />
-                ))}
-                {/* Pad to match input row count */}
-                {Array.from({ length: Math.max(0, socketInputs.length - node.outputs.length) }).map((_, i) => (
-                  <div key={`pad-${i}`} className="py-1 h-6" />
+          {/* Node body */}
+          <div style={{ background: '#1e1e30' }}>
+            {/* Description */}
+            {node.description && (
+              <div
+                className="px-3 py-1.5 text-[10px] text-slate-500 italic"
+                style={{ borderBottom: '1px solid #2a2a40' }}
+              >
+                {node.description}
+              </div>
+            )}
+
+            {/* Socket connections — left inputs, right outputs side by side */}
+            {(socketInputs.length > 0 || node.outputs.length > 0) && (
+              <div className="flex">
+                {/* Left: socket inputs */}
+                <div className="flex-1 py-1 pr-2 pl-3">
+                  {socketInputs.map((input) => (
+                    <SocketInputRow key={input.id} input={input} />
+                  ))}
+                  {/* Pad to match output row count */}
+                  {Array.from({ length: Math.max(0, node.outputs.length - socketInputs.length) }).map((_, i) => (
+                    <div key={`pad-${i}`} className="py-1 h-6" />
+                  ))}
+                </div>
+
+                {/* Divider */}
+                {socketInputs.length > 0 && node.outputs.length > 0 && (
+                  <div style={{ width: 1, background: '#2d2d4a' }} />
+                )}
+
+                {/* Right: outputs */}
+                <div className="flex-1 py-1 pl-2 pr-3">
+                  {node.outputs.map((output) => (
+                    <OutputRow key={output.id} output={output} />
+                  ))}
+                  {/* Pad to match input row count */}
+                  {Array.from({ length: Math.max(0, socketInputs.length - node.outputs.length) }).map((_, i) => (
+                    <div key={`pad-${i}`} className="py-1 h-6" />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Widget inputs */}
+            {widgetInputs.length > 0 && (
+              <div style={{ borderTop: (socketInputs.length > 0 || node.outputs.length > 0) ? '1px solid #2a2a40' : undefined }}>
+                {widgetInputs.map((input) => (
+                  <div
+                    key={input.id}
+                    style={{ borderBottom: '1px solid #252538' }}
+                  >
+                    <WidgetRow input={input} />
+                  </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Widget inputs */}
-          {widgetInputs.length > 0 && (
-            <div style={{ borderTop: (socketInputs.length > 0 || node.outputs.length > 0) ? '1px solid #2a2a40' : undefined }}>
-              {widgetInputs.map((input) => (
-                <div
-                  key={input.id}
-                  style={{ borderBottom: '1px solid #252538' }}
-                >
-                  <WidgetRow input={input} />
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Empty state */}
-          {node.inputs.length === 0 && node.outputs.length === 0 && (
-            <div className="py-6 text-center text-xs text-slate-600">
-              No inputs or outputs defined
-            </div>
-          )}
+            {/* Empty state */}
+            {node.inputs.length === 0 && node.outputs.length === 0 && (
+              <div className="py-6 text-center text-xs text-slate-600">
+                No inputs or outputs defined
+              </div>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Stats below the node */}
-      <div className="mt-8 flex gap-6 text-xs text-slate-600">
-        <span>
-          <span className="text-slate-400">{socketInputs.length}</span> socket input{socketInputs.length !== 1 ? 's' : ''}
-        </span>
-        <span>
-          <span className="text-slate-400">{widgetInputs.length}</span> widget{widgetInputs.length !== 1 ? 's' : ''}
-        </span>
-        <span>
-          <span className="text-slate-400">{node.outputs.length}</span> output{node.outputs.length !== 1 ? 's' : ''}
-        </span>
-      </div>
+        {/* Stats below the node */}
+        <div className="mt-8 flex gap-6 text-xs text-slate-600">
+          <span>
+            <span className="text-slate-400">{socketInputs.length}</span> socket input{socketInputs.length !== 1 ? 's' : ''}
+          </span>
+          <span>
+            <span className="text-slate-400">{widgetInputs.length}</span> widget{widgetInputs.length !== 1 ? 's' : ''}
+          </span>
+          <span>
+            <span className="text-slate-400">{node.outputs.length}</span> output{node.outputs.length !== 1 ? 's' : ''}
+          </span>
+        </div>
 
-      {/* Type legend for types in use */}
-      <TypeLegend node={node} />
-    </div>
+        {/* Type legend for types in use */}
+        <TypeLegend node={node} />
+      </div>
+    </ColorOverridesContext.Provider>
   )
 }
 
 function TypeLegend({ node }: { node: ComfyNodeDef }): JSX.Element | null {
+  const overrides = useContext(ColorOverridesContext)
   const types = new Set<ComfyType>()
   node.inputs.forEach((i) => types.add(i.type))
   node.outputs.forEach((o) => types.add(o.type))
@@ -397,7 +372,7 @@ function TypeLegend({ node }: { node: ComfyNodeDef }): JSX.Element | null {
     <div className="mt-6 flex flex-wrap gap-2 justify-center max-w-[400px]">
       {[...types].map((type) => {
         const info = getTypeInfo(type)
-        const color = typeColor(type)
+        const color = getTypeHex(type, overrides)
         return (
           <div
             key={type}

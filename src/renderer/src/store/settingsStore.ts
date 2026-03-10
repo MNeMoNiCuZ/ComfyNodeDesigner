@@ -13,23 +13,36 @@ interface SettingsState {
   ollamaModels: string[]
   ollamaFetched: boolean
   customInstructions: string
+  instructionScope: 'global' | 'provider' | 'model'
+  providerInstructions: Partial<Record<string, string>>
+  modelInstructions: Record<string, string>
+  typeColorOverrides: Record<string, string>
   activeEditorTab: string
   llmGenerating: boolean
   recentProjects: RecentProject[]
   maxRecentProjects: number
   recentProjectsEnabled: boolean
+  customModels: Partial<Record<LLMProvider, string[]>>
 
   setActiveProvider: (provider: LLMProvider) => void
   setProviderModel: (provider: LLMProvider, model: string) => void
   setProviderBaseUrl: (provider: LLMProvider, baseUrl: string) => void
   setTheme: (theme: 'dark' | 'light') => void
   setCustomInstructions: (instructions: string) => void
+  setInstructionScope: (scope: 'global' | 'provider' | 'model') => void
+  setProviderInstruction: (provider: string, text: string) => void
+  setModelInstruction: (providerModel: string, text: string) => void
+  getEffectiveInstructions: (provider: string, model: string) => string
+  setTypeColorOverride: (type: string, hex: string) => void
+  resetTypeColorOverride: (type: string) => void
   setActiveEditorTab: (tab: string) => void
   setLLMGenerating: (generating: boolean) => void
   addRecentProject: (path: string, name: string) => void
   clearRecentProjects: () => void
   setMaxRecentProjects: (n: number) => void
   setRecentProjectsEnabled: (enabled: boolean) => void
+  addCustomModel: (provider: LLMProvider, model: string) => void
+  removeCustomModel: (provider: LLMProvider, model: string) => void
   loadFromMain: () => Promise<void>
   persistToMain: () => Promise<void>
   fetchOllamaModels: () => Promise<string[]>
@@ -51,11 +64,16 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   ollamaModels: [],
   ollamaFetched: false,
   customInstructions: '',
+  instructionScope: 'provider',
+  providerInstructions: {},
+  modelInstructions: {},
+  typeColorOverrides: {},
   activeEditorTab: 'identity',
   llmGenerating: false,
   recentProjects: [],
   maxRecentProjects: 10,
   recentProjectsEnabled: true,
+  customModels: {},
 
   setActiveProvider: (provider) => {
     set((state) => ({ llm: { ...state.llm, activeProvider: provider } }))
@@ -92,21 +110,55 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setCustomInstructions: (instructions) => {
     set({ customInstructions: instructions })
-    // Persist custom instructions along with other settings
+    get().persistToMain()
+  },
+
+  setInstructionScope: (scope) => {
+    set({ instructionScope: scope })
+    get().persistToMain()
+  },
+
+  setProviderInstruction: (provider, text) => {
+    set((state) => ({
+      providerInstructions: { ...state.providerInstructions, [provider]: text }
+    }))
+    get().persistToMain()
+  },
+
+  setModelInstruction: (providerModel, text) => {
+    set((state) => ({
+      modelInstructions: { ...state.modelInstructions, [providerModel]: text }
+    }))
+    get().persistToMain()
+  },
+
+  getEffectiveInstructions: (provider, model) => {
     const state = get()
-    try {
-      const s = get()
-      window.electronAPI.saveSettings(
-        serializableSettings(s.llm, {
-          customInstructions: instructions,
-          recentProjects: s.recentProjects,
-          maxRecentProjects: s.maxRecentProjects,
-          recentProjectsEnabled: s.recentProjectsEnabled
-        })
-      )
-    } catch {
-      // non-fatal
+    switch (state.instructionScope) {
+      case 'provider':
+        return state.providerInstructions[provider] ?? ''
+      case 'model':
+        return state.modelInstructions[`${provider}:${model}`] ?? ''
+      case 'global':
+      default:
+        return state.customInstructions
     }
+  },
+
+  setTypeColorOverride: (type, hex) => {
+    set((state) => ({
+      typeColorOverrides: { ...state.typeColorOverrides, [type]: hex }
+    }))
+    get().persistToMain()
+  },
+
+  resetTypeColorOverride: (type) => {
+    set((state) => {
+      const overrides = { ...state.typeColorOverrides }
+      delete overrides[type]
+      return { typeColorOverrides: overrides }
+    })
+    get().persistToMain()
   },
 
   setActiveEditorTab: (tab) => set({ activeEditorTab: tab }),
@@ -143,6 +195,25 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     get().persistToMain()
   },
 
+  addCustomModel: (provider, model) => {
+    const trimmed = model.trim()
+    if (!trimmed) return
+    set((state) => {
+      const existing = state.customModels[provider] ?? []
+      if (existing.includes(trimmed)) return state
+      return { customModels: { ...state.customModels, [provider]: [...existing, trimmed] } }
+    })
+    get().persistToMain()
+  },
+
+  removeCustomModel: (provider, model) => {
+    set((state) => {
+      const existing = state.customModels[provider] ?? []
+      return { customModels: { ...state.customModels, [provider]: existing.filter((m) => m !== model) } }
+    })
+    get().persistToMain()
+  },
+
   loadFromMain: async () => {
     try {
       const saved = await window.electronAPI.getSettings()
@@ -162,6 +233,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           if (typeof saved.customInstructions === 'string') {
             update.customInstructions = saved.customInstructions
           }
+          if (saved.instructionScope && ['global', 'provider', 'model'].includes(saved.instructionScope as string)) {
+            update.instructionScope = saved.instructionScope as 'global' | 'provider' | 'model'
+          }
+          if (saved.providerInstructions && typeof saved.providerInstructions === 'object') {
+            update.providerInstructions = saved.providerInstructions as Partial<Record<string, string>>
+          }
+          if (saved.modelInstructions && typeof saved.modelInstructions === 'object') {
+            update.modelInstructions = saved.modelInstructions as Record<string, string>
+          }
+          if (saved.typeColorOverrides && typeof saved.typeColorOverrides === 'object') {
+            update.typeColorOverrides = saved.typeColorOverrides as Record<string, string>
+          }
           if (Array.isArray(saved.recentProjects)) {
             update.recentProjects = saved.recentProjects as RecentProject[]
           }
@@ -170,6 +253,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           }
           if (typeof saved.recentProjectsEnabled === 'boolean') {
             update.recentProjectsEnabled = saved.recentProjectsEnabled
+          }
+          if (saved.customModels && typeof saved.customModels === 'object') {
+            update.customModels = saved.customModels as Partial<Record<LLMProvider, string[]>>
           }
           return { ...state, ...update }
         })
@@ -185,9 +271,14 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       await window.electronAPI.saveSettings(
         serializableSettings(state.llm, {
           customInstructions: state.customInstructions,
+          instructionScope: state.instructionScope,
+          providerInstructions: state.providerInstructions,
+          modelInstructions: state.modelInstructions,
+          typeColorOverrides: state.typeColorOverrides,
           recentProjects: state.recentProjects,
           maxRecentProjects: state.maxRecentProjects,
-          recentProjectsEnabled: state.recentProjectsEnabled
+          recentProjectsEnabled: state.recentProjectsEnabled,
+          customModels: state.customModels
         })
       )
     } catch {

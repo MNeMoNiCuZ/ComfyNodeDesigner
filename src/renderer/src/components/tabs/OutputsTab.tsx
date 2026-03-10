@@ -74,9 +74,8 @@ export function OutputsTab({ node }: OutputsTabProps): JSX.Element {
       <div className="flex-1 overflow-y-auto p-4 space-y-2">
         {node.outputs.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
-            <p className="text-sm text-slate-500">No outputs defined.</p>
-            <p className="text-xs text-slate-600 max-w-sm">
-              Nodes with no outputs are typically OUTPUT_NODE types (like Save Image). Enable that in the Advanced tab.
+            <p className="text-sm text-slate-500">
+              No outputs — <span className="text-slate-600">nodes that only produce side effects (e.g. save files) should enable <strong className="text-slate-500">OUTPUT_NODE</strong> in the <strong className="text-slate-500">Advanced</strong> tab instead.</span>
             </p>
             <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setAddingNew(true)}>
               <Plus className="h-3.5 w-3.5" />

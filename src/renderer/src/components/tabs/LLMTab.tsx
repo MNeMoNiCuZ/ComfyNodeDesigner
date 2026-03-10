@@ -33,7 +33,7 @@ const VALID_COMFY_TYPES = new Set([
   'IMAGE', 'LATENT', 'CONDITIONING', 'MODEL', 'VAE', 'CLIP', 'MASK',
   'CONTROL_NET', 'STYLE_MODEL', 'CLIP_VISION', 'CLIP_VISION_OUTPUT',
   'UPSCALE_MODEL', 'SAMPLER', 'SIGMAS', 'GUIDER', 'NOISE', 'GLIGEN',
-  'AUDIO', 'INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO', '*'
+  'AUDIO', 'INT', 'FLOAT', 'STRING', 'BOOLEAN', 'SEED', 'COMBO', '*'
 ])
 
 const WIDGET_INPUT_TYPES = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
@@ -230,6 +230,32 @@ function applyOperations(
         break
       }
 
+      case 'set_identity': {
+        // Allows updating identity fields: displayName, internalName, category, description, functionName, usePackFolder
+        const identityUpdates: Partial<ComfyNodeDef> = {}
+        if (typeof op.displayName === 'string') identityUpdates.displayName = op.displayName
+        if (typeof op.internalName === 'string') identityUpdates.internalName = op.internalName
+        if (typeof op.category === 'string') identityUpdates.category = op.category
+        if (typeof op.description === 'string') identityUpdates.description = op.description
+        if (typeof op.functionName === 'string') identityUpdates.functionName = op.functionName
+        if (typeof op.usePackFolder === 'boolean') identityUpdates.usePackFolder = op.usePackFolder
+        Object.assign(node, identityUpdates) // mutate local copy for change tracking
+        changes.push(`identity(${Object.keys(identityUpdates).join(', ')})`)
+        return { updates: { inputs, outputs, executeBody, ...identityUpdates }, summary: changes.join(', ') }
+      }
+
+      case 'set_advanced': {
+        const advancedUpdates: Partial<ComfyNodeDef> = {}
+        if (typeof op.isOutputNode === 'boolean') advancedUpdates.isOutputNode = op.isOutputNode
+        if (typeof op.isInputNode === 'boolean') advancedUpdates.isInputNode = op.isInputNode
+        if (typeof op.validateInputs === 'boolean') advancedUpdates.validateInputs = op.validateInputs
+        if (op.isChangedMode !== undefined && ['none', 'always', 'hash'].includes(String(op.isChangedMode))) {
+          advancedUpdates.isChangedMode = op.isChangedMode as 'none' | 'always' | 'hash'
+        }
+        changes.push(`advanced(${Object.keys(advancedUpdates).join(', ')})`)
+        return { updates: { inputs, outputs, executeBody, ...advancedUpdates }, summary: changes.join(', ') }
+      }
+
       default:
         return { error: `Unknown operation type: "${op.op}"` }
     }
@@ -390,7 +416,20 @@ function buildFunctionalityEditPrompt(node: ComfyNodeDef): string {
   // Also generate full code for reference
   const fullCode = generateAllFiles([node], 'node').singleFilePy
 
-  return `${base}
+  const identityContext = `
+CURRENT NODE IDENTITY & SETTINGS:
+  displayName: "${node.displayName}"
+  internalName: "${node.internalName}"
+  category: "${node.category}"
+  description: "${node.description ?? ''}"
+  functionName: "${node.functionName}"
+  isOutputNode: ${node.isOutputNode}
+  isInputNode: ${node.isInputNode}
+  validateInputs: ${node.validateInputs}
+  isChangedMode: "${node.isChangedMode}"
+  usePackFolder: ${node.usePackFolder ?? false}`
+
+  return `${base}${identityContext}
 
 ---
 
@@ -426,6 +465,13 @@ Each operation must be one of:
 
 7. Set the function code (indented with 8 spaces):
 {"op": "set_code", "code": "        import torch\\n        result = image * 2\\n        return (result,)"}
+
+8. Update identity fields (displayName, internalName, category, description, functionName, usePackFolder):
+{"op": "set_identity", "displayName": "Better Node Name", "category": "image/processing"}
+
+9. Update advanced settings:
+{"op": "set_advanced", "isOutputNode": true, "isChangedMode": "always"}
+   Valid isChangedMode values: "none" (default caching), "always" (re-run every time), "hash" (re-run when inputs change)
 
 For widget inputs (INT, FLOAT, STRING, BOOLEAN, COMBO with forceInput=false), you can include widget config:
 {"op": "add_input", "name": "strength", "type": "FLOAT", "required": true, "forceInput": false, "widget": {"min": 0.0, "max": 1.0, "step": 0.01, "default": 0.5}}
@@ -485,6 +531,18 @@ function summarizeOperations(operations: any[]): string {
       case 'set_code':
         parts.push('Update function code')
         break
+      case 'set_identity': {
+        const fields = ['displayName', 'internalName', 'category', 'description', 'functionName', 'usePackFolder']
+          .filter((f) => op[f] !== undefined)
+        parts.push(`Update identity (${fields.join(', ')})`)
+        break
+      }
+      case 'set_advanced': {
+        const fields = ['isOutputNode', 'isInputNode', 'validateInputs', 'isChangedMode']
+          .filter((f) => op[f] !== undefined)
+        parts.push(`Update advanced (${fields.join(', ')})`)
+        break
+      }
       default:
         parts.push(`Unknown: ${op.op}`)
     }
@@ -556,28 +614,49 @@ function CopyButton({ text, className }: { text: string; className?: string }): 
 // AssistantMessage component
 // ---------------------------------------------------------------------------
 
+// Render old → new diff for a set of field changes
+function DiffRow({ label, oldVal, newVal }: { label: string; oldVal: unknown; newVal: unknown }): JSX.Element {
+  const fmt = (v: unknown): string => (v === undefined || v === null ? '—' : String(v))
+  const changed = String(oldVal) !== String(newVal)
+  return (
+    <span className="flex items-center gap-1 flex-wrap">
+      <span className="text-slate-400">{label}:</span>
+      {changed ? (
+        <>
+          <code className="text-slate-600 line-through">{fmt(oldVal)}</code>
+          <span className="text-slate-600">→</span>
+          <code className="text-yellow-300">{fmt(newVal)}</code>
+        </>
+      ) : (
+        <code className="text-slate-500">{fmt(newVal)}</code>
+      )}
+    </span>
+  )
+}
+
 function AssistantMessage({
   content,
-  mode
+  mode,
+  node
 }: {
   content: string
   mode?: EditMode
+  node?: ComfyNodeDef
 }): JSX.Element {
   const [rawJsonOpen, setRawJsonOpen] = useState(false)
 
-  // Functionality Edit mode: parse and display operations summary
+  // Functionality Edit mode: parse and display operations summary with diffs
   if (mode === 'execute') {
     const jsonStr = extractJsonObject(content)
     if (jsonStr) {
       try {
         const parsed = JSON.parse(jsonStr)
         if (Array.isArray(parsed.operations)) {
-          const summary = summarizeOperations(parsed.operations)
           return (
             <div className="space-y-2">
               <div className="text-sm text-slate-300">
                 <p className="font-medium text-slate-200 mb-1">Proposed changes:</p>
-                <ul className="list-disc list-inside space-y-0.5 text-slate-400">
+                <ul className="list-disc list-inside space-y-1 text-slate-400">
                   {parsed.operations.map((op: any, i: number) => (
                     <li key={i} className="text-xs">
                       {(() => {
@@ -586,18 +665,25 @@ function AssistantMessage({
                             return (
                               <span>
                                 Add input <code className="text-blue-400">"{op.name}"</code>{' '}
-                                <span className="text-slate-500">({op.type})</span>
+                                <span className="text-slate-500">({op.type ?? 'IMAGE'})</span>
                               </span>
                             )
-                          case 'update_input':
+                          case 'update_input': {
+                            const existing = node?.inputs.find((inp) => inp.name === op.name)
+                            const updates = op.updates ?? op
                             return (
-                              <span>
-                                Update input <code className="text-yellow-400">"{op.name}"</code>{' '}
-                                <span className="text-slate-500">
-                                  ({Object.keys(op.updates ?? {}).join(', ')})
-                                </span>
+                              <span className="flex flex-col gap-0.5 mt-0.5">
+                                <span>Update input <code className="text-yellow-400">"{op.name}"</code></span>
+                                {existing && (
+                                  <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
+                                    {updates.type && <DiffRow label="type" oldVal={existing.type} newVal={updates.type} />}
+                                    {updates.required !== undefined && <DiffRow label="required" oldVal={existing.required} newVal={updates.required} />}
+                                    {updates.forceInput !== undefined && <DiffRow label="forceInput" oldVal={existing.forceInput} newVal={updates.forceInput} />}
+                                  </span>
+                                )}
                               </span>
                             )
+                          }
                           case 'delete_input':
                             return (
                               <span>
@@ -608,15 +694,23 @@ function AssistantMessage({
                             return (
                               <span>
                                 Add output <code className="text-blue-400">"{op.name}"</code>{' '}
-                                <span className="text-slate-500">({op.type})</span>
+                                <span className="text-slate-500">({op.type ?? 'IMAGE'})</span>
                               </span>
                             )
-                          case 'update_output':
+                          case 'update_output': {
+                            const existing = node?.outputs.find((o) => o.name === op.name)
+                            const updates = op.updates ?? op
                             return (
-                              <span>
-                                Update output <code className="text-yellow-400">"{op.name}"</code>
+                              <span className="flex flex-col gap-0.5 mt-0.5">
+                                <span>Update output <code className="text-yellow-400">"{op.name}"</code></span>
+                                {existing && updates.type && (
+                                  <span className="ml-3 text-[10px]">
+                                    <DiffRow label="type" oldVal={existing.type} newVal={updates.type} />
+                                  </span>
+                                )}
                               </span>
                             )
+                          }
                           case 'delete_output':
                             return (
                               <span>
@@ -625,8 +719,36 @@ function AssistantMessage({
                             )
                           case 'set_code':
                             return <span>Update function code</span>
+                          case 'set_identity': {
+                            const fields = ['displayName', 'internalName', 'category', 'description', 'functionName', 'usePackFolder'] as const
+                            const changed = fields.filter((f) => op[f] !== undefined)
+                            return (
+                              <span className="flex flex-col gap-0.5 mt-0.5">
+                                <span>Update identity</span>
+                                <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
+                                  {changed.map((f) => (
+                                    <DiffRow key={f} label={f} oldVal={node?.[f]} newVal={op[f]} />
+                                  ))}
+                                </span>
+                              </span>
+                            )
+                          }
+                          case 'set_advanced': {
+                            const fields = ['isOutputNode', 'isInputNode', 'validateInputs', 'isChangedMode'] as const
+                            const changed = fields.filter((f) => op[f] !== undefined)
+                            return (
+                              <span className="flex flex-col gap-0.5 mt-0.5">
+                                <span>Update advanced settings</span>
+                                <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
+                                  {changed.map((f) => (
+                                    <DiffRow key={f} label={f} oldVal={node?.[f]} newVal={op[f]} />
+                                  ))}
+                                </span>
+                              </span>
+                            )
+                          }
                           default:
-                            return <span>Unknown operation: {op.op}</span>
+                            return <span className="text-slate-600">Unknown operation: {op.op}</span>
                         }
                       })()}
                     </li>
@@ -740,9 +862,10 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     ollamaModels,
     ollamaFetched,
     fetchOllamaModels,
-    customInstructions,
+    getEffectiveInstructions,
     setLLMGenerating,
-    setActiveEditorTab
+    setActiveEditorTab,
+    customModels
   } = useSettingsStore()
 
   const [editMode, setEditMode] = useState<EditMode>('execute')
@@ -773,8 +896,9 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     }
   }, [llm.activeProvider, ollamaFetched, fetchOllamaModels])
 
-  const modelList =
+  const baseModelList =
     llm.activeProvider === 'ollama' ? ollamaModels : DEFAULT_MODELS[llm.activeProvider]
+  const modelList = [...new Set([...baseModelList, ...(customModels[llm.activeProvider] ?? [])])]
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -803,8 +927,12 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
   const baseSystemPrompt =
     editMode === 'execute' ? buildFunctionalityEditPrompt(node) : buildFullCodePrompt(node)
 
-  const fullSystemPrompt = customInstructions
-    ? baseSystemPrompt + '\n\n--- Custom Instructions ---\n' + customInstructions
+  const effectiveInstructions = getEffectiveInstructions(
+    llm.activeProvider,
+    llm.providers[llm.activeProvider].model
+  )
+  const fullSystemPrompt = effectiveInstructions
+    ? baseSystemPrompt + '\n\n--- Custom Instructions ---\n' + effectiveInstructions
     : baseSystemPrompt
 
   const handleSend = useCallback(async () => {
@@ -1131,7 +1259,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
             <ChevronRight className="h-3 w-3" />
           )}
           System Prompt
-          {customInstructions && (
+          {effectiveInstructions && (
             <span className="text-blue-400 ml-1">(+ custom instructions)</span>
           )}
         </button>
@@ -1185,7 +1313,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
               <p className="text-slate-200 whitespace-pre-wrap">{msg.content}</p>
             ) : (
               <div>
-                <AssistantMessage content={msg.content} mode={msg.mode} />
+                <AssistantMessage content={msg.content} mode={msg.mode} node={node} />
                 <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/30">
                   <Button
                     size="sm"
