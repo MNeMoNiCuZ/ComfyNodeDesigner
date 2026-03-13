@@ -1,23 +1,42 @@
 # ComfyNode Designer
 
-A modern desktop GUI for designing and generating [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes — without writing boilerplate.
+A desktop GUI for designing and generating [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes — without writing boilerplate.
 
-You visually configure your node's inputs, outputs, category, and flags. The app generates all the required Python code programmatically. An integrated LLM assistant writes the actual node logic (`execute()` body) based on your description, with full multi-turn conversation history so you can iterate.
+You can visually configure your node's inputs, outputs, category, and flags. The app generates all the required Python code programmatically.
+
+<img width="1308" height="388" alt="image" src="https://github.com/user-attachments/assets/7ad53d06-11d6-4c70-9570-a13d9281e6e3" />
+
+
+An integrated LLM assistant writes the actual node logic (`execute()` body) based on your description, with full multi-turn conversation history so you can iterate and see what was added when.
+
+<img width="1309" height="1129" alt="image" src="https://github.com/user-attachments/assets/1e1dac53-c911-4fb5-b5e7-de8eff30ae28" />
+
+Preview your node visually to see something like what it will look like in ComfyUI.
+
+<img width="742" height="535" alt="image" src="https://github.com/user-attachments/assets/ed4ba531-50c7-44a9-82ae-13708187321f" />
+
+View the code for the node.
+
+<img width="964" height="833" alt="image" src="https://github.com/user-attachments/assets/80db9587-d842-4567-8fd7-74458679e07f" />
+
+
 
 ---
 
 ## Features
 
-### Visual node editor
+### Node Editor
 
 | Tab | What it does |
 |---|---|
-| **Identity** | Internal name (snake_case), display name, category, pack folder toggle |
+| **Node Settings** | Internal name (snake_case), display name, category, pack folder toggle |
 | **Inputs** | Add/edit/reorder input sockets and widgets with full type and config |
 | **Outputs** | Add/edit/reorder output sockets |
 | **Advanced** | OUTPUT_NODE, INPUT_NODE, VALIDATE_INPUTS, IS_CHANGED flags |
 | **Preview** | Read-only Monaco Editor showing the full generated Python in real time |
 | **AI Assistant** | Multi-turn LLM chat for generating or rewriting node logic |
+
+
 
 ### Node pack management
 
@@ -27,23 +46,19 @@ You visually configure your node's inputs, outputs, category, and flags. The app
 - Set a persistent **Export Location** (your `ComfyUI/custom_nodes/` folder) for one-click export from the toolbar or Pack tab
 - Exported structure: `PackName/__init__.py` + `PackName/nodes/<node>.py` + `PackName/README.md`
 
-### All ComfyUI types
+<img width="1302" height="1042" alt="image" src="https://github.com/user-attachments/assets/cbca49c6-8e19-4cb7-8621-9a7cac9980f1" />
 
-| Type | Category |
-|---|---|
-| `IMAGE`, `MASK` | Tensor |
-| `LATENT` | Tensor |
-| `CONDITIONING` | Tensor |
-| `MODEL`, `VAE`, `CLIP` | Model |
-| `CONTROL_NET`, `STYLE_MODEL` | Model |
-| `CLIP_VISION`, `CLIP_VISION_OUTPUT` | Model / Tensor |
-| `UPSCALE_MODEL` | Model |
-| `SAMPLER`, `SIGMAS`, `GUIDER`, `NOISE` | Sampling |
-| `GLIGEN` | Model |
-| `AUDIO` | Other |
-| `INT`, `FLOAT`, `STRING`, `BOOLEAN`, `COMBO` | Primitive (widget) |
-| `SEED` | Special — name the input `seed` and ComfyUI auto-adds the **Control After Generate** widget |
-| `*` | Any / Wildcard |
+
+### Exporting to node pack
+- **Single button press** — Export your nodes to a custom node pack.
+
+<img width="1137" height="714" alt="image" src="https://github.com/user-attachments/assets/0cb2909d-49c7-4d8f-a284-1637ce920d3c" />
+
+### Importing node packs
+- **Import existing node packs** — If a node pack uses the same layout/structure, it can be imported into the tool.
+  
+<img width="617" height="489" alt="image" src="https://github.com/user-attachments/assets/6176885e-5708-4253-82bc-31693340958f" />
+
 
 ### Widget configuration
 
@@ -73,7 +88,7 @@ You visually configure your node's inputs, outputs, category, and flags. The app
 - **Proposal preview** — proposed changes are shown as a diff in the Inputs/Outputs tabs before you accept
 - **Custom AI instructions** — extra guidance appended to the system prompt, scoped to global / provider / model
 
-### 7 LLM providers
+### LLM providers
 
 OpenAI, Anthropic (Claude), Google Gemini, Groq, xAI (Grok), OpenRouter, Ollama (local)
 
