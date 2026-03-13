@@ -1,6 +1,8 @@
 import React from 'react'
 import { useProjectStore, useSelectedNode } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
+import { applyOperations } from '../../lib/nodeOperations'
+import type { ComfyNodeDef } from '../../types/node.types'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs'
 import { IdentityTab } from '../tabs/IdentityTab'
 import { InputsTab } from '../tabs/InputsTab'
@@ -14,6 +16,50 @@ import { PackTab } from '../tabs/PackTab'
 import { Box, Plus, Settings } from 'lucide-react'
 import { Button } from '../ui/button'
 
+// ---------------------------------------------------------------------------
+// ProposalBar — shown when there is a pending AI proposal for the selected node
+// ---------------------------------------------------------------------------
+
+function ProposalBar({
+  nodeId,
+  onAccept,
+  onReject
+}: {
+  nodeId: string
+  onAccept: () => void
+  onReject: () => void
+}): JSX.Element {
+  const { pendingProposal } = useSettingsStore()
+  if (!pendingProposal || pendingProposal.nodeId !== nodeId) return <></>
+
+  const ops = pendingProposal.operations ?? []
+  const validOps = ops.filter((op: any) => !op._invalid)
+  const invalidOps = ops.filter((op: any) => op._invalid)
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-2.5 bg-amber-950/80 border-b-2 border-amber-600 text-amber-100">
+      <div className="flex-1 flex items-center gap-2 min-w-0">
+        <span className="text-sm font-bold uppercase tracking-wide text-amber-300">AI Proposal Active</span>
+        <span className="text-xs text-amber-400">
+          {validOps.length} valid{invalidOps.length > 0 ? `, ${invalidOps.length} failed` : ''}
+        </span>
+      </div>
+      <button
+        onClick={onReject}
+        className="px-3 py-1 text-xs font-semibold rounded border border-red-700 bg-red-900/60 text-red-300 hover:bg-red-800/80 transition-colors"
+      >
+        Reject
+      </button>
+      <button
+        onClick={onAccept}
+        className="px-3 py-1 text-xs font-semibold rounded border border-green-700 bg-green-900/60 text-green-300 hover:bg-green-800/80 transition-colors"
+      >
+        Accept
+      </button>
+    </div>
+  )
+}
+
 const NODE_TABS = [
   { value: 'identity', label: 'Node Settings' },
   { value: 'inputs', label: 'Inputs' },
@@ -25,9 +71,28 @@ const NODE_TABS = [
 ]
 
 export function NodeEditor(): JSX.Element {
-  const { addNode, packSelected } = useProjectStore()
+  const { addNode, packSelected, updateNode, pushLLMSnapshot } = useProjectStore()
   const selectedNode = useSelectedNode()
-  const { activeEditorTab, setActiveEditorTab, llmGenerating } = useSettingsStore()
+  const { activeEditorTab, setActiveEditorTab, llmGenerating, pendingProposal, setPendingProposal } = useSettingsStore()
+
+  function handleAcceptProposal(node: ComfyNodeDef): void {
+    if (!pendingProposal || pendingProposal.nodeId !== node.id) return
+    const ops = pendingProposal.operations ?? []
+    const validOps = ops.filter((op: any) => !op._invalid)
+    if (validOps.length === 0) {
+      setPendingProposal(null)
+      return
+    }
+    const result = applyOperations(node, validOps)
+    if ('error' in result) return
+    pushLLMSnapshot(node.id, node)
+    updateNode(node.id, result.updates)
+    setPendingProposal(null)
+  }
+
+  function handleRejectProposal(): void {
+    setPendingProposal(null)
+  }
 
   // When pack is selected, show PackTab (with Settings accessible)
   if (packSelected && !selectedNode) {
@@ -160,6 +225,15 @@ export function NodeEditor(): JSX.Element {
             </TabsTrigger>
           </TabsList>
         </div>
+
+        {/* Proposal bar — shown when AI proposal is pending for this node */}
+        {pendingProposal?.nodeId === selectedNode.id && (
+          <ProposalBar
+            nodeId={selectedNode.id}
+            onAccept={() => handleAcceptProposal(selectedNode)}
+            onReject={handleRejectProposal}
+          />
+        )}
 
         {/* Tab content */}
         <div className="flex-1 overflow-hidden">

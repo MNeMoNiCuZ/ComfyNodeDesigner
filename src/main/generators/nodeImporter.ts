@@ -295,32 +295,134 @@ function extractExecuteBody(classBody: string, functionName: string): string {
 
 // ─── main parse function ─────────────────────────────────────────────────────
 
-export function parseNodeFile(source: string, filename: string): ImportedNodeDef[] {
+/**
+ * Detect top-level relative imports in a Python source file.
+ * Returns a map of module name → list of imported names (or ['*'] for star imports).
+ */
+function detectRelativeImports(source: string): Map<string, string[]> {
+  const result = new Map<string, string[]>()
+  // Match: from .module import name1, name2  OR  from . import module
+  const re = /^from\s+\.(\w+)\s+import\s+(.+)$/gm
+  let m: RegExpExecArray | null
+  while ((m = re.exec(source)) !== null) {
+    const moduleName = m[1]
+    const importedNames = m[2].split(',').map((s) => s.trim()).filter(Boolean)
+    result.set(moduleName, importedNames)
+  }
+  // Also match: from . import module1, module2
+  const starRe = /^from\s+\.\s+import\s+(.+)$/gm
+  while ((m = starRe.exec(source)) !== null) {
+    const names = m[1].split(',').map((s) => s.trim()).filter(Boolean)
+    for (const name of names) {
+      if (!result.has(name)) result.set(name, ['*'])
+    }
+  }
+  return result
+}
+
+/**
+ * Inline utility module source code into an execute body.
+ * Re-indents the utility source to 8 spaces and prepends it with comment delimiters.
+ */
+function inlineUtilityCode(executeBody: string, moduleName: string, utilSource: string): string {
+  // Strip the shebang/encoding lines and filter out relative imports from the utility itself
+  const utilLines = utilSource.split('\n').filter((line) => {
+    // Skip lines that are relative imports (they won't work when inlined)
+    if (/^\s*from\s+\./.test(line)) return false
+    return true
+  })
+
+  // Re-indent: add 8 spaces to each non-empty line
+  const indented = utilLines
+    .map((line) => (line.trim() === '' ? '' : '        ' + line))
+    .join('\n')
+    .trimEnd()
+
+  const header = `        # ── Inlined from: ${moduleName}.py (relative import) ──`
+  const footer = `        # ── End of ${moduleName}.py ──`
+
+  return `${header}\n${indented}\n${footer}\n\n${executeBody}`
+}
+
+export function parseNodeFile(
+  source: string,
+  filename: string,
+  utilityFiles?: Map<string, string>
+): ImportedNodeDef[] {
   const nodes: ImportedNodeDef[] = []
 
-  // Extract NODE_CLASS_MAPPINGS
-  const classMappingsMatch = source.match(/NODE_CLASS_MAPPINGS\s*=\s*\{([^}]+)\}/s)
-  if (!classMappingsMatch) return []
+  // Find NODE_CLASS_MAPPINGS *assignment* specifically (not import statements).
+  // e.g. NODE_CLASS_MAPPINGS = { ... }  or  NODE_CLASS_MAPPINGS={...}
+  const classMappingsAssignRe = /\bNODE_CLASS_MAPPINGS\s*=/g
+  let classMappingsContent = ''
+  let assignMatch: RegExpExecArray | null
+  while ((assignMatch = classMappingsAssignRe.exec(source)) !== null) {
+    const braceIdx = source.indexOf('{', assignMatch.index + assignMatch[0].length)
+    if (braceIdx === -1) continue
+    // Make sure nothing meaningful sits between '=' and '{' (just whitespace/newline)
+    const between = source.slice(assignMatch.index + assignMatch[0].length, braceIdx)
+    if (/[^{\s]/.test(between)) continue // dict comprehension or other expression — skip
+    const candidate = extractBalancedBraces(source, braceIdx)
+    if (candidate) {
+      classMappingsContent = candidate
+      break
+    }
+  }
+  if (!classMappingsContent) return []
 
   const classMappings: Record<string, string> = {}
-  const classEntryRe = /["']([^"']+)["']\s*:\s*(\w+)/g
+  // Use a permissive pattern for class name: any non-whitespace/comma/brace sequence
+  // This handles Unicode identifiers and emoji-prefixed internal names
+  const classEntryRe = /["']([^"']+)["']\s*:\s*([^\s,{}()\[\]'"]+)/g
   let m: RegExpExecArray | null
-  while ((m = classEntryRe.exec(classMappingsMatch[1])) !== null) {
-    classMappings[m[1]] = m[2]
+  while ((m = classEntryRe.exec(classMappingsContent)) !== null) {
+    const internalName = m[1]
+    const className = m[2]
+    // Only accept class names that are valid Python identifiers (no spread **vars)
+    if (/^[A-Za-z_]/.test(className) && !className.startsWith('**')) {
+      classMappings[internalName] = className
+    }
   }
 
-  // Extract NODE_DISPLAY_NAME_MAPPINGS
+  if (Object.keys(classMappings).length === 0) return []
+
+  // Extract NODE_DISPLAY_NAME_MAPPINGS assignment (same safe approach as above)
   const displayMappings: Record<string, string> = {}
-  const displayMappingsMatch = source.match(/NODE_DISPLAY_NAME_MAPPINGS\s*=\s*\{([^}]+)\}/s)
-  if (displayMappingsMatch) {
-    const displayEntryRe = /["']([^"']+)["']\s*:\s*["']([^"']+)["']/g
-    while ((m = displayEntryRe.exec(displayMappingsMatch[1])) !== null) {
-      displayMappings[m[1]] = m[2]
+  const displayAssignRe = /\bNODE_DISPLAY_NAME_MAPPINGS\s*=/g
+  let displayAssignMatch: RegExpExecArray | null
+  while ((displayAssignMatch = displayAssignRe.exec(source)) !== null) {
+    const braceIdx = source.indexOf('{', displayAssignMatch.index + displayAssignMatch[0].length)
+    if (braceIdx === -1) continue
+    const between = source.slice(displayAssignMatch.index + displayAssignMatch[0].length, braceIdx)
+    if (/[^{\s]/.test(between)) continue
+    const displayContent = extractBalancedBraces(source, braceIdx)
+    if (displayContent) {
+      const displayEntryRe = /["']([^"']+)["']\s*:\s*["']([^"']+)["']/g
+      while ((m = displayEntryRe.exec(displayContent)) !== null) {
+        displayMappings[m[1]] = m[2]
+      }
+      break
     }
   }
 
   for (const [internalName, className] of Object.entries(classMappings)) {
-    const classBody = extractClassBody(source, className)
+    // Find the class body — first in this file, then by searching all utility files.
+    // This handles __init__.py packs where each class lives in its own imported file.
+    let classBody = extractClassBody(source, className)
+    let classSource = source
+
+    if (!classBody && utilityFiles) {
+      for (const [, utilSource] of utilityFiles) {
+        if (utilSource === source) continue
+        const found = extractClassBody(utilSource, className)
+        if (found) {
+          classBody = found
+          classSource = utilSource
+          break
+        }
+      }
+    }
+
     if (!classBody) continue
 
     const category = extractStringValue(classBody, 'CATEGORY') ?? 'custom'
@@ -335,8 +437,22 @@ export function parseNodeFile(source: string, filename: string): ImportedNodeDef
     }))
 
     const inputs = parseInputTypes(classBody)
-    const executeBody = extractExecuteBody(classBody, functionName)
+    let executeBody = extractExecuteBody(classBody, functionName)
     const displayName = displayMappings[internalName] ?? internalName
+
+    // Inline any utility modules imported by the file that defines this class
+    if (utilityFiles) {
+      const relativeImports = detectRelativeImports(classSource)
+      if (relativeImports.size > 0) {
+        const modules = Array.from(relativeImports.keys()).reverse()
+        for (const moduleName of modules) {
+          const utilSource = utilityFiles.get(moduleName)
+          if (utilSource) {
+            executeBody = inlineUtilityCode(executeBody, moduleName, utilSource)
+          }
+        }
+      }
+    }
 
     nodes.push({
       internalName,
@@ -376,29 +492,64 @@ export async function handleImportNodeFile(): Promise<ImportedNodeDef[]> {
 
 export async function handleImportNodeFolder(): Promise<ImportedNodeDef[]> {
   const result = await dialog.showOpenDialog({
-    title: 'Select Node Folder to Import',
+    title: 'Select ComfyUI Node Pack Folder to Import',
     properties: ['openDirectory']
   })
 
   if (result.canceled || !result.filePaths[0]) return []
 
   const dir = result.filePaths[0]
-  let entries: string[]
-  try {
-    entries = await fs.readdir(dir)
-  } catch {
-    return []
+
+  // ── Pass 1: collect all .py file sources ──────────────────────────────────
+  // fileContents: basename (no .py) → source, for all files found across root + subdirs
+  const fileContents = new Map<string, string>()
+
+  async function collectPyFiles(scanDir: string): Promise<void> {
+    let entries: string[]
+    try {
+      entries = await fs.readdir(scanDir)
+    } catch {
+      return
+    }
+    for (const file of entries) {
+      if (!file.endsWith('.py')) continue
+      const fullPath = path.join(scanDir, file)
+      try {
+        const source = await fs.readFile(fullPath, 'utf-8')
+        const key = file.slice(0, -3) // strip .py
+        fileContents.set(key, source)
+      } catch {
+        // skip unreadable files
+      }
+    }
   }
 
-  const pyFiles = entries.filter((f) => f.endsWith('.py'))
-  const allNodes: ImportedNodeDef[] = []
+  await collectPyFiles(dir)
 
-  for (const file of pyFiles) {
+  try {
+    const rootEntries = await fs.readdir(dir, { withFileTypes: true }) as unknown as import('fs').Dirent[]
+    for (const entry of rootEntries) {
+      if (entry.isDirectory()) {
+        await collectPyFiles(path.join(dir, entry.name))
+      }
+    }
+  } catch {
+    // ignore
+  }
+
+  // ── Pass 2: parse node files, inlining utilities ──────────────────────────
+  const allNodes: ImportedNodeDef[] = []
+  const seenInternalNames = new Set<string>()
+
+  for (const [baseName, source] of fileContents) {
     try {
-      const fullPath = path.join(dir, file)
-      const source = await fs.readFile(fullPath, 'utf-8')
-      const parsed = parseNodeFile(source, file)
-      allNodes.push(...parsed)
+      const parsed = parseNodeFile(source, `${baseName}.py`, fileContents)
+      for (const node of parsed) {
+        if (!seenInternalNames.has(node.internalName)) {
+          seenInternalNames.add(node.internalName)
+          allNodes.push(node)
+        }
+      }
     } catch {
       // skip unparseable files
     }

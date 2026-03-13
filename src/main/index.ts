@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, safeStorage } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, safeStorage } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import {
@@ -6,6 +6,7 @@ import {
   handleLoadProject,
   handleLoadProjectFromPath,
   handleExportCode,
+  handleExportToPath,
   handleSaveApiKey,
   handleGetApiKeys,
   handleSaveSettings,
@@ -13,10 +14,14 @@ import {
   handleImportNodeFolder,
   handleImportNodeFile
 } from './ipc/fileHandlers'
-import { handleGenerateLLM, handleGenerateLLMChat, handleTestConnection, handleFetchOllamaModels, abortRequest } from './ipc/llmHandlers'
+import { handleGenerateLLM, handleGenerateLLMChat, handleTestConnection, handleFetchOllamaModels, handleFetchGroqModels, abortRequest } from './ipc/llmHandlers'
 import type { LLMProvider } from '../renderer/src/types/llm.types'
 
 function createWindow(): BrowserWindow {
+  const iconPath = is.dev
+    ? join(__dirname, '../../src/assets/ComfyUINodeDesigner.png')
+    : join(process.resourcesPath, 'icon.png')
+
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -24,6 +29,7 @@ function createWindow(): BrowserWindow {
     minHeight: 600,
     show: false,
     autoHideMenuBar: true,
+    icon: iconPath,
     titleBarStyle: 'hidden',
     titleBarOverlay: {
       color: '#0f172a',
@@ -60,6 +66,15 @@ app.whenReady().then(() => {
 
   const mainWin = createWindow()
 
+  // Window close — handle via IPC so we can show a confirm dialog reliably
+  mainWin.on('close', (e) => {
+    e.preventDefault()
+    mainWin.webContents.send('check-before-close')
+  })
+  ipcMain.on('force-close', () => {
+    mainWin.destroy()
+  })
+
   // File handlers
   ipcMain.handle('file:save-project', (_, project, currentPath) =>
     handleSaveProject(project, currentPath)
@@ -93,6 +108,12 @@ app.whenReady().then(() => {
     handleFetchOllamaModels(baseUrl)
   )
 
+  ipcMain.handle('llm:fetch-groq-models', async (_, apiKey) => {
+    const key = apiKey ?? (await handleGetApiKeys(safeStorage))['groq'] ?? ''
+    if (!key) throw new Error('No Groq API key configured')
+    return handleFetchGroqModels(key)
+  })
+
   // Settings handlers
   ipcMain.handle('settings:save-api-key', (_, provider, key) =>
     handleSaveApiKey(provider, key, safeStorage)
@@ -111,6 +132,32 @@ app.whenReady().then(() => {
   ipcMain.handle('file:load-project-path', (_, filePath) => handleLoadProjectFromPath(filePath))
   ipcMain.handle('file:import-node-folder', () => handleImportNodeFolder())
   ipcMain.handle('file:import-node-file', () => handleImportNodeFile())
+
+  ipcMain.handle('file:select-export-folder', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Export Folder (point to custom_nodes/)',
+      properties: ['openDirectory', 'createDirectory']
+    })
+    if (result.canceled || !result.filePaths[0]) return null
+    return result.filePaths[0]
+  })
+
+  ipcMain.handle('file:export-to-path', (_, nodes, packName, exportPath) =>
+    handleExportToPath(nodes, packName, exportPath)
+  )
+
+  ipcMain.handle('window:confirm', async (_, message: string, detail?: string) => {
+    const result = await dialog.showMessageBox(mainWin, {
+      type: 'question',
+      buttons: ['OK', 'Cancel'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'ComfyNode Designer',
+      message,
+      detail
+    })
+    return result.response === 0
+  })
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

@@ -153,9 +153,9 @@ export function NodePanel(): JSX.Element {
                     className="rounded p-0.5 text-slate-500 hover:text-red-400 hover:bg-slate-700"
                     onClick={(e) => {
                       e.stopPropagation()
-                      if (window.confirm(`Delete node "${node.displayName}"?`)) {
-                        deleteNode(node.id)
-                      }
+                      window.electronAPI.showConfirmDialog(`Delete "${node.displayName}"?`, 'This cannot be undone.').then((ok) => {
+                        if (ok) deleteNode(node.id)
+                      })
                     }}
                   >
                     <Trash2 className="h-3 w-3" />

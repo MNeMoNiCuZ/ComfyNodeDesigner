@@ -21,12 +21,13 @@ interface InputEditModalProps {
   input?: NodeInput
   onSave: (input: NodeInput) => void
   onClose: () => void
+  readOnly?: boolean
 }
 
 const WIDGET_TYPES = new Set<ComfyType>(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
 
-export function InputEditModal({ open, input, onSave, onClose }: InputEditModalProps): JSX.Element {
-  const isNew = !input
+export function InputEditModal({ open, input, onSave, onClose, readOnly }: InputEditModalProps): JSX.Element {
+  const isNew = !input && !readOnly
   const [draft, setDraft] = useState<NodeInput>(() =>
     input ? { ...input, widget: input.widget ? { ...input.widget } : undefined } : createDefaultInput()
   )
@@ -79,7 +80,7 @@ export function InputEditModal({ open, input, onSave, onClose }: InputEditModalP
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isNew ? 'Add Input' : 'Edit Input'}</DialogTitle>
+          <DialogTitle>{readOnly ? 'Proposed Input (read-only)' : isNew ? 'Add Input' : 'Edit Input'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={(e) => { e.preventDefault(); if (canSave) handleSave() }} className="space-y-4 py-2">
@@ -270,10 +271,16 @@ export function InputEditModal({ open, input, onSave, onClose }: InputEditModalP
         </form>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} type="button">Cancel</Button>
-          <Button onClick={handleSave} disabled={!canSave} type="button">
-            {isNew ? 'Add Input' : 'Save Changes'}
-          </Button>
+          {readOnly ? (
+            <Button variant="ghost" onClick={onClose} type="button">Close</Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={onClose} type="button">Cancel</Button>
+              <Button onClick={handleSave} disabled={!canSave} type="button">
+                {isNew ? 'Add Input' : 'Save Changes'}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

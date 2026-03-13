@@ -18,10 +18,11 @@ interface OutputEditModalProps {
   output?: NodeOutput
   onSave: (output: NodeOutput) => void
   onClose: () => void
+  readOnly?: boolean
 }
 
-export function OutputEditModal({ open, output, onSave, onClose }: OutputEditModalProps): JSX.Element {
-  const isNew = !output
+export function OutputEditModal({ open, output, onSave, onClose, readOnly }: OutputEditModalProps): JSX.Element {
+  const isNew = !output && !readOnly
   const [draft, setDraft] = useState<NodeOutput>(() =>
     output ? { ...output } : createDefaultOutput()
   )
@@ -44,7 +45,7 @@ export function OutputEditModal({ open, output, onSave, onClose }: OutputEditMod
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle>{isNew ? 'Add Output' : 'Edit Output'}</DialogTitle>
+          <DialogTitle>{readOnly ? 'Proposed Output (read-only)' : isNew ? 'Add Output' : 'Edit Output'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={(e) => { e.preventDefault(); if (canSave) handleSave() }} className="space-y-4 py-2">
@@ -92,10 +93,16 @@ export function OutputEditModal({ open, output, onSave, onClose }: OutputEditMod
         </form>
 
         <DialogFooter>
-          <Button variant="ghost" onClick={onClose} type="button">Cancel</Button>
-          <Button onClick={handleSave} disabled={!canSave} type="button">
-            {isNew ? 'Add Output' : 'Save Changes'}
-          </Button>
+          {readOnly ? (
+            <Button variant="ghost" onClick={onClose} type="button">Close</Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={onClose} type="button">Cancel</Button>
+              <Button onClick={handleSave} disabled={!canSave} type="button">
+                {isNew ? 'Add Output' : 'Save Changes'}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

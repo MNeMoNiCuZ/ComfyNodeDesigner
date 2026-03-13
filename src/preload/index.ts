@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   loadProject: () => ipcRenderer.invoke('file:load-project'),
 
-  exportCode: (nodes: unknown, mode: 'single' | 'package', projectName: string) =>
+  exportCode: (nodes: unknown, mode: 'individual' | 'package', projectName: string) =>
     ipcRenderer.invoke('file:export-code', nodes, mode, projectName),
 
   // LLM
@@ -23,6 +23,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   fetchOllamaModels: (baseUrl: string) =>
     ipcRenderer.invoke('llm:fetch-ollama-models', baseUrl),
+
+  fetchGroqModels: () =>
+    ipcRenderer.invoke('llm:fetch-groq-models'),
 
   // API key management (keys never leave main process memory)
   saveApiKey: (provider: string, key: string) =>
@@ -42,5 +45,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // Import
   importNodeFolder: () => ipcRenderer.invoke('file:import-node-folder'),
-  importNodeFile: () => ipcRenderer.invoke('file:import-node-file')
+  importNodeFile: () => ipcRenderer.invoke('file:import-node-file'),
+
+  // Export path helpers
+  selectExportFolder: () => ipcRenderer.invoke('file:select-export-folder'),
+  exportToPath: (nodes: unknown, packName: string, exportPath: string) =>
+    ipcRenderer.invoke('file:export-to-path', nodes, packName, exportPath),
+
+  // Native OS confirmation dialog (avoids ugly browser-style window.confirm)
+  showConfirmDialog: (message: string, detail?: string) =>
+    ipcRenderer.invoke('window:confirm', message, detail),
+
+  // Window close handling — main sends 'check-before-close', renderer decides
+  onCheckClose: (handler: () => void) => {
+    ipcRenderer.on('check-before-close', () => handler())
+  },
+  forceClose: () => ipcRenderer.send('force-close')
 })

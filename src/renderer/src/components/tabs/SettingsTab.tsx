@@ -3,20 +3,27 @@ import { useSettingsStore } from '../../store/settingsStore'
 import { useSelectedNode } from '../../store/projectStore'
 import type { LLMProvider } from '../../types/llm.types'
 import { PROVIDER_LABELS, DEFAULT_MODELS } from '../../types/llm.types'
-import { COMFY_TYPE_INFO, getTypeHex } from '../../lib/comfyTypes'
-import type { ComfyType } from '../../types/node.types'
+import { COMFY_TYPE_INFO } from '../../lib/comfyTypes'
 import { buildLLMSystemPrompt } from '../../../../main/generators/codeGenerator'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
 import { Textarea } from '../ui/textarea'
 import { Switch } from '../ui/switch'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw, X, Plus, ChevronDown, ChevronRight } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 const PROVIDERS: LLMProvider[] = ['openai', 'anthropic', 'google', 'groq', 'xai', 'openrouter', 'ollama']
 
-type SettingsSubTab = 'general' | 'color' | 'ai'
+type SettingsSubTab = 'general' | 'color' | 'ai' | 'prompts'
+
+const SUB_TAB_LABELS: Record<SettingsSubTab, string> = {
+  general: 'General',
+  color: 'Color',
+  ai: 'AI Providers',
+  prompts: 'Prompts',
+}
 
 export function SettingsTab(): JSX.Element {
   const [subTab, setSubTab] = useState<SettingsSubTab>('general')
@@ -33,7 +40,7 @@ export function SettingsTab(): JSX.Element {
 
         {/* Sub-tab bar */}
         <div className="flex gap-1 border-b border-slate-700/50 pb-0">
-          {(['general', 'color', 'ai'] as SettingsSubTab[]).map((tab) => (
+          {(['general', 'color', 'ai', 'prompts'] as SettingsSubTab[]).map((tab) => (
             <button
               key={tab}
               onClick={() => setSubTab(tab)}
@@ -44,7 +51,7 @@ export function SettingsTab(): JSX.Element {
                   : 'border-transparent text-slate-400 hover:text-slate-200'
               )}
             >
-              {tab === 'general' ? 'General' : tab === 'color' ? 'Color' : 'AI Assistant'}
+              {SUB_TAB_LABELS[tab]}
             </button>
           ))}
         </div>
@@ -52,32 +59,190 @@ export function SettingsTab(): JSX.Element {
         {subTab === 'general' && <GeneralSubTab />}
         {subTab === 'color' && <ColorSubTab />}
         {subTab === 'ai' && <AIAssistantSubTab />}
+        {subTab === 'prompts' && <PromptsSubTab />}
       </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// General sub-tab
+// General sub-tab — only Recent Projects
 // ---------------------------------------------------------------------------
 
 function GeneralSubTab(): JSX.Element {
+  const {
+    recentProjects,
+    recentProjectsEnabled,
+    maxRecentProjects,
+    setRecentProjectsEnabled,
+    setMaxRecentProjects,
+    clearRecentProjects
+  } = useSettingsStore()
+
+  return (
+    <div className="space-y-6">
+      {/* Recent Projects */}
+      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-3">
+        <Label className="text-sm font-semibold text-slate-200">Recent Projects</Label>
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-slate-400">Enable recent projects history</span>
+          <Switch
+            checked={recentProjectsEnabled}
+            onCheckedChange={setRecentProjectsEnabled}
+          />
+        </div>
+        {recentProjectsEnabled && (
+          <>
+            <div className="flex items-center gap-3">
+              <Label className="text-xs text-slate-400 shrink-0">Max history count</Label>
+              <Input
+                type="number"
+                min={10}
+                max={100}
+                step={10}
+                value={maxRecentProjects}
+                onChange={(e) => {
+                  const n = parseInt(e.target.value, 10)
+                  if (!isNaN(n) && n >= 10 && n <= 100) setMaxRecentProjects(n)
+                }}
+                className="w-20 text-sm"
+              />
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">
+                {recentProjects.length} project{recentProjects.length !== 1 ? 's' : ''} in history
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-slate-700 text-xs"
+                onClick={clearRecentProjects}
+                disabled={recentProjects.length === 0}
+              >
+                Clear History
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Color sub-tab
+// ---------------------------------------------------------------------------
+
+function ColorSwatchRow({ typeInfo }: { typeInfo: typeof COMFY_TYPE_INFO[number] }): JSX.Element {
+  const { typeColorOverrides, setTypeColorOverride, resetTypeColorOverride } = useSettingsStore()
+  const overriddenHex = typeColorOverrides[typeInfo.type]
+  const effectiveHex = overriddenHex ?? typeInfo.hex
+  const [inputValue, setInputValue] = useState(effectiveHex)
+
+  useEffect(() => {
+    setInputValue(overriddenHex ?? typeInfo.hex)
+  }, [overriddenHex, typeInfo.hex])
+
+  function handleHexChange(val: string): void {
+    setInputValue(val)
+    if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+      setTypeColorOverride(typeInfo.type, val)
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-3 py-1.5 border-b border-slate-700/30 last:border-0">
+      {/* Color swatch */}
+      <div
+        className="h-5 w-5 rounded shrink-0 border border-slate-600"
+        style={{ backgroundColor: effectiveHex }}
+      />
+      {/* Type label */}
+      <span className="text-xs font-mono text-slate-300 w-36 shrink-0">{typeInfo.label}</span>
+      {/* Type key */}
+      <span className="text-[10px] font-mono text-slate-500 w-28 shrink-0">{typeInfo.type}</span>
+      {/* Native color picker — dark color scheme so the picker dialog renders dark */}
+      <input
+        type="color"
+        value={effectiveHex}
+        onChange={(e) => handleHexChange(e.target.value)}
+        className="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-600 bg-transparent p-0.5"
+        style={{ colorScheme: 'dark' }}
+        title="Pick color"
+      />
+      {/* Hex input */}
+      <Input
+        value={inputValue}
+        onChange={(e) => handleHexChange(e.target.value)}
+        className="font-mono text-xs h-7 w-28 shrink-0"
+        placeholder="#RRGGBB"
+        maxLength={7}
+      />
+      {/* Reset button */}
+      {overriddenHex && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs text-slate-400 hover:text-slate-200"
+          onClick={() => resetTypeColorOverride(typeInfo.type)}
+          title="Reset to default"
+        >
+          Reset
+        </Button>
+      )}
+    </div>
+  )
+}
+
+function ColorSubTab(): JSX.Element {
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
+        <Label className="text-sm font-semibold text-slate-200 block mb-1">Type Colors</Label>
+        <p className="text-xs text-muted-foreground mb-4">
+          Customize the connector dot colors used in the node preview. Changes affect the Preview tab only — badge colors use fixed Tailwind classes.
+        </p>
+        <div>
+          {COMFY_TYPE_INFO.map((typeInfo) => (
+            <ColorSwatchRow key={typeInfo.type} typeInfo={typeInfo} />
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// AI Assistant sub-tab
+// ---------------------------------------------------------------------------
+
+function AIAssistantSubTab(): JSX.Element {
   const {
     llm,
     setProviderModel,
     setProviderBaseUrl,
     ollamaModels,
     fetchOllamaModels,
-    recentProjects,
-    recentProjectsEnabled,
-    maxRecentProjects,
-    setRecentProjectsEnabled,
-    setMaxRecentProjects,
-    clearRecentProjects,
+    groqModels,
+    fetchGroqModels,
     customModels,
     addCustomModel,
-    removeCustomModel
+    removeCustomModel,
+    customInstructions,
+    setCustomInstructions,
+    instructionScope,
+    setInstructionScope,
+    providerInstructions,
+    setProviderInstruction,
+    modelInstructions,
+    setModelInstruction,
+    contextMessageCount,
+    setContextMessageCount
   } = useSettingsStore()
+
+  const selectedNode = useSelectedNode()
+
+  // Provider config state
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({})
   const [keyStatus, setKeyStatus] = useState<Record<string, boolean>>({})
   const [showKey, setShowKey] = useState<Record<string, boolean>>({})
@@ -85,7 +250,16 @@ function GeneralSubTab(): JSX.Element {
   const [testResult, setTestResult] = useState<Record<string, boolean | null>>({})
   const [saving, setSaving] = useState<Record<string, boolean>>({})
   const [fetchingModels, setFetchingModels] = useState(false)
+  const [fetchingGroqModels, setFetchingGroqModels] = useState(false)
   const [newModelInput, setNewModelInput] = useState<Record<string, string>>({})
+
+  // System prompt UI state
+  const [systemPromptOpen, setSystemPromptOpen] = useState(false)
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set())
+
+  // Per-model form state
+  const [newModelProvider, setNewModelProvider] = useState<LLMProvider>(llm.activeProvider)
+  const [newModelName, setNewModelName] = useState('')
 
   useEffect(() => {
     window.electronAPI.getApiKeyStatus().then((status: Record<string, boolean>) => {
@@ -130,13 +304,60 @@ function GeneralSubTab(): JSX.Element {
     }
   }
 
+  async function handleFetchGroqModels(): Promise<void> {
+    setFetchingGroqModels(true)
+    try {
+      await fetchGroqModels()
+    } catch (e) {
+      alert(`Could not fetch Groq models: ${(e as Error).message}`)
+    } finally {
+      setFetchingGroqModels(false)
+    }
+  }
+
+  function toggleProviderExpand(provider: string): void {
+    setExpandedProviders((prev) => {
+      const next = new Set(prev)
+      if (next.has(provider)) next.delete(provider)
+      else next.add(provider)
+      return next
+    })
+  }
+
+  function handleAddModelInstruction(): void {
+    const key = `${newModelProvider}:${newModelName.trim()}`
+    if (!newModelName.trim()) return
+    setModelInstruction(key, '')
+    setNewModelName('')
+  }
+
+  // Build available models for per-model datalist
+  function getModelsForProvider(provider: LLMProvider): string[] {
+    let base: string[]
+    if (provider === 'ollama') base = ollamaModels
+    else if (provider === 'groq') base = groqModels.length > 0 ? groqModels : DEFAULT_MODELS.groq
+    else base = DEFAULT_MODELS[provider]
+    const custom = customModels[provider] ?? []
+    return [...new Set([...base, ...custom])]
+  }
+
   return (
     <div className="space-y-6">
-      {/* Provider tabs */}
+      {/* ================================================================
+          Section 1: AI Providers
+          ================================================================ */}
       <div className="space-y-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-200">AI Providers</h3>
+          <p className="text-xs text-muted-foreground mt-0.5">Configure API keys and models for each provider.</p>
+        </div>
         {PROVIDERS.map((provider) => {
           const config = llm.providers[provider]
-          const baseModels = provider === 'ollama' ? ollamaModels : DEFAULT_MODELS[provider]
+          const baseModels = provider === 'ollama'
+            ? ollamaModels
+            : provider === 'groq' && groqModels.length > 0
+              ? groqModels
+              : DEFAULT_MODELS[provider]
           const userModels = customModels[provider] ?? []
           const allModels = [...new Set([...baseModels, ...userModels])]
 
@@ -145,6 +366,23 @@ function GeneralSubTab(): JSX.Element {
               <div className="flex items-center gap-2">
                 {keyStatus[provider] && <span className="h-2 w-2 rounded-full bg-green-400 shrink-0" />}
                 <h3 className="text-sm font-semibold text-slate-200">{PROVIDER_LABELS[provider]}</h3>
+                {provider === 'groq' && keyStatus[provider] && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="ml-auto h-7 gap-1.5 text-xs text-slate-400 hover:text-slate-200"
+                    onClick={handleFetchGroqModels}
+                    disabled={fetchingGroqModels}
+                    title="Fetch available models from Groq API"
+                  >
+                    {fetchingGroqModels ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-3.5 w-3.5" />
+                    )}
+                    Fetch Models
+                  </Button>
+                )}
               </div>
 
               {/* API Key (not for Ollama) */}
@@ -332,143 +570,17 @@ function GeneralSubTab(): JSX.Element {
         })}
       </div>
 
-      {/* Recent Projects */}
-      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-3">
-        <Label className="text-sm font-semibold text-slate-200">Recent Projects</Label>
-        <div className="flex items-center justify-between">
-          <span className="text-xs text-slate-400">Enable recent projects history</span>
-          <Switch
-            checked={recentProjectsEnabled}
-            onCheckedChange={setRecentProjectsEnabled}
-          />
-        </div>
-        {recentProjectsEnabled && (
-          <>
-            <div className="flex items-center gap-3">
-              <Label className="text-xs text-slate-400 shrink-0">Max history count</Label>
-              <Input
-                type="number"
-                min={10}
-                max={100}
-                step={10}
-                value={maxRecentProjects}
-                onChange={(e) => {
-                  const n = parseInt(e.target.value, 10)
-                  if (!isNaN(n) && n >= 10 && n <= 100) setMaxRecentProjects(n)
-                }}
-                className="w-20 text-sm"
-              />
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">
-                {recentProjects.length} project{recentProjects.length !== 1 ? 's' : ''} in history
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="border-slate-700 text-xs"
-                onClick={clearRecentProjects}
-                disabled={recentProjects.length === 0}
-              >
-                Clear History
-              </Button>
-            </div>
-          </>
-        )}
-      </div>
     </div>
   )
 }
 
 // ---------------------------------------------------------------------------
-// Color sub-tab
+// Prompts sub-tab — system prompt instructions + context history
 // ---------------------------------------------------------------------------
 
-function ColorSwatchRow({ typeInfo }: { typeInfo: typeof COMFY_TYPE_INFO[number] }): JSX.Element {
-  const { typeColorOverrides, setTypeColorOverride, resetTypeColorOverride } = useSettingsStore()
-  const overriddenHex = typeColorOverrides[typeInfo.type]
-  const effectiveHex = overriddenHex ?? typeInfo.hex
-  const [inputValue, setInputValue] = useState(effectiveHex)
-
-  useEffect(() => {
-    setInputValue(overriddenHex ?? typeInfo.hex)
-  }, [overriddenHex, typeInfo.hex])
-
-  function handleHexChange(val: string): void {
-    setInputValue(val)
-    // Only apply if it looks like a valid hex color
-    if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
-      setTypeColorOverride(typeInfo.type, val)
-    }
-  }
-
-  return (
-    <div className="flex items-center gap-3 py-1.5 border-b border-slate-700/30 last:border-0">
-      {/* Color swatch */}
-      <div
-        className="h-5 w-5 rounded shrink-0 border border-slate-600"
-        style={{ backgroundColor: effectiveHex }}
-      />
-      {/* Type label */}
-      <span className="text-xs font-mono text-slate-300 w-36 shrink-0">{typeInfo.label}</span>
-      {/* Type key */}
-      <span className="text-[10px] font-mono text-slate-500 w-28 shrink-0">{typeInfo.type}</span>
-      {/* Native color picker */}
-      <input
-        type="color"
-        value={effectiveHex}
-        onChange={(e) => handleHexChange(e.target.value)}
-        className="h-7 w-10 shrink-0 cursor-pointer rounded border border-slate-600 bg-transparent p-0.5"
-        title="Pick color"
-      />
-      {/* Hex input */}
-      <Input
-        value={inputValue}
-        onChange={(e) => handleHexChange(e.target.value)}
-        className="font-mono text-xs h-7 w-28 shrink-0"
-        placeholder="#RRGGBB"
-        maxLength={7}
-      />
-      {/* Reset button */}
-      {overriddenHex && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 px-2 text-xs text-slate-400 hover:text-slate-200"
-          onClick={() => resetTypeColorOverride(typeInfo.type)}
-          title="Reset to default"
-        >
-          Reset
-        </Button>
-      )}
-    </div>
-  )
-}
-
-function ColorSubTab(): JSX.Element {
-  return (
-    <div className="space-y-4">
-      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4">
-        <Label className="text-sm font-semibold text-slate-200 block mb-1">Type Colors</Label>
-        <p className="text-xs text-muted-foreground mb-4">
-          Customize the connector dot colors used in the node preview. Changes affect the Preview tab only — badge colors use fixed Tailwind classes.
-        </p>
-        <div>
-          {COMFY_TYPE_INFO.map((typeInfo) => (
-            <ColorSwatchRow key={typeInfo.type} typeInfo={typeInfo} />
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// AI Assistant sub-tab
-// ---------------------------------------------------------------------------
-
-function AIAssistantSubTab(): JSX.Element {
+function PromptsSubTab(): JSX.Element {
   const {
+    llm,
     customInstructions,
     setCustomInstructions,
     instructionScope,
@@ -477,41 +589,54 @@ function AIAssistantSubTab(): JSX.Element {
     setProviderInstruction,
     modelInstructions,
     setModelInstruction,
-    llm,
     contextMessageCount,
-    setContextMessageCount
+    setContextMessageCount,
+    ollamaModels,
+    groqModels,
+    customModels,
   } = useSettingsStore()
+
   const selectedNode = useSelectedNode()
-  const [newModelKey, setNewModelKey] = useState('')
   const [systemPromptOpen, setSystemPromptOpen] = useState(false)
+  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set())
+  const [newModelProvider, setNewModelProvider] = useState<LLMProvider>(llm.activeProvider)
+  const [newModelName, setNewModelName] = useState('')
+
+  function toggleProviderExpand(provider: string): void {
+    setExpandedProviders((prev) => {
+      const next = new Set(prev)
+      if (next.has(provider)) next.delete(provider)
+      else next.add(provider)
+      return next
+    })
+  }
+
+  function getModelsForProvider(provider: LLMProvider): string[] {
+    let base: string[]
+    if (provider === 'ollama') base = ollamaModels
+    else if (provider === 'groq') base = groqModels.length > 0 ? groqModels : DEFAULT_MODELS.groq
+    else base = DEFAULT_MODELS[provider]
+    const custom = customModels[provider] ?? []
+    return [...new Set([...base, ...custom])]
+  }
+
+  function handleAddModelInstruction(): void {
+    const key = `${newModelProvider}:${newModelName.trim()}`
+    if (!newModelName.trim()) return
+    setModelInstruction(key, '')
+    setNewModelName('')
+  }
 
   return (
-    <div className="space-y-4">
-      {/* Context History */}
-      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-3">
-        <Label className="text-sm font-semibold text-slate-200">Context History</Label>
-        <p className="text-xs text-muted-foreground">How many recent messages to include in each AI request for multi-turn context.</p>
-        <div className="flex items-center gap-3">
-          <Input
-            type="number"
-            min={0}
-            max={50}
-            value={contextMessageCount}
-            onChange={(e) => {
-              const n = parseInt(e.target.value, 10)
-              if (!isNaN(n) && n >= 0 && n <= 50) setContextMessageCount(n)
-            }}
-            className="w-20"
-          />
-          <span className="text-xs text-slate-500">messages (0 = current message only)</span>
-        </div>
-      </div>
-
+    <div className="space-y-6">
+      {/* ================================================================
+          System Prompt
+          ================================================================ */}
       <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-4">
         <div>
-          <Label className="text-sm font-semibold text-slate-200">Custom AI Instructions</Label>
+          <Label className="text-sm font-semibold text-slate-200">System Prompt</Label>
           <p className="text-xs text-muted-foreground mt-1">
-            Appended to the system prompt for AI generations.
+            Configure the instructions sent to the AI. Leave a field empty to use the auto-generated node context prompt. When filled, your text is appended to the auto-generated prompt.
           </p>
         </div>
 
@@ -539,7 +664,7 @@ function AIAssistantSubTab(): JSX.Element {
         {/* Global scope */}
         {instructionScope === 'global' && (
           <div className="space-y-1.5">
-            <Label className="text-xs text-slate-400">Global Instructions</Label>
+            <Label className="text-xs text-slate-400">Global additions (appended to all requests)</Label>
             <Textarea
               value={customInstructions}
               onChange={(e) => setCustomInstructions(e.target.value)}
@@ -549,99 +674,140 @@ function AIAssistantSubTab(): JSX.Element {
           </div>
         )}
 
-        {/* Per-provider scope */}
+        {/* Per-provider scope — accordion */}
         {instructionScope === 'provider' && (
-          <div className="space-y-3">
-            {PROVIDERS.map((provider) => (
-              <div key={provider} className="space-y-1">
-                <Label className="text-xs text-slate-400">{PROVIDER_LABELS[provider]}</Label>
-                <Textarea
-                  value={providerInstructions[provider] ?? ''}
-                  onChange={(e) => setProviderInstruction(provider, e.target.value)}
-                  placeholder={`Custom instructions for ${PROVIDER_LABELS[provider]}…`}
-                  className="resize-none h-16 text-sm font-mono"
-                />
-              </div>
-            ))}
+          <div className="space-y-2">
+            {PROVIDERS.map((provider) => {
+              const isExpanded = expandedProviders.has(provider)
+              const text = providerInstructions[provider] ?? ''
+              const hasContent = text.trim().length > 0
+              return (
+                <div key={provider} className="rounded border border-slate-700/60 bg-slate-900/30">
+                  <button
+                    className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left hover:bg-slate-800/40 transition-colors"
+                    onClick={() => toggleProviderExpand(provider)}
+                  >
+                    {isExpanded ? <ChevronDown className="h-3 w-3 shrink-0 text-slate-500" /> : <ChevronRight className="h-3 w-3 shrink-0 text-slate-500" />}
+                    <span className="flex-1 font-medium text-slate-300">{PROVIDER_LABELS[provider]}</span>
+                    {hasContent && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-900/40 text-blue-400 border border-blue-800/40">set</span>
+                    )}
+                  </button>
+                  {isExpanded && (
+                    <div className="px-3 pb-3">
+                      <Textarea
+                        value={text}
+                        onChange={(e) => setProviderInstruction(provider, e.target.value)}
+                        placeholder={`Custom instructions for ${PROVIDER_LABELS[provider]}…`}
+                        className="resize-none h-16 text-sm font-mono"
+                      />
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {/* Per-model scope */}
+        {/* Per-model scope — form + cards */}
         {instructionScope === 'model' && (
           <div className="space-y-3">
-            <p className="text-xs text-slate-500">
-              Key format: <code className="bg-slate-700 px-1 rounded">provider:model</code> — e.g. <code className="bg-slate-700 px-1 rounded">openai:gpt-4o</code>
-            </p>
-            {Object.entries(modelInstructions).map(([key, text]) => (
-              <div key={key} className="space-y-1">
-                <div className="flex items-center justify-between">
-                  <Label className="text-xs text-slate-400 font-mono">{key}</Label>
-                  <button
-                    className="text-xs text-slate-500 hover:text-red-400"
-                    onClick={() => setModelInstruction(key, '')}
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-                <Textarea
-                  value={text}
-                  onChange={(e) => setModelInstruction(key, e.target.value)}
-                  placeholder={`Custom instructions for ${key}…`}
-                  className="resize-none h-16 text-sm font-mono"
-                />
+            <div className="flex gap-2 items-end">
+              <div className="space-y-1">
+                <Label className="text-xs text-slate-400">Provider</Label>
+                <Select value={newModelProvider} onValueChange={(v) => setNewModelProvider(v as LLMProvider)}>
+                  <SelectTrigger className="h-8 text-xs w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROVIDERS.map((p) => (
+                      <SelectItem key={p} value={p}>{PROVIDER_LABELS[p]}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            ))}
-            {/* Add new model key */}
-            <div className="flex gap-2">
-              <Input
-                value={newModelKey}
-                onChange={(e) => setNewModelKey(e.target.value)}
-                placeholder={`${llm.activeProvider}:${llm.providers[llm.activeProvider].model || 'model-name'}`}
-                className="font-mono text-xs h-8 flex-1"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && newModelKey.trim()) {
-                    setModelInstruction(newModelKey.trim(), '')
-                    setNewModelKey('')
-                  }
-                }}
-              />
-              <Button
-                variant="secondary"
-                size="sm"
-                className="h-8 gap-1"
-                disabled={!newModelKey.trim()}
-                onClick={() => {
-                  setModelInstruction(newModelKey.trim(), '')
-                  setNewModelKey('')
-                }}
-              >
+              <div className="space-y-1 flex-1">
+                <Label className="text-xs text-slate-400">Model name</Label>
+                <Input
+                  value={newModelName}
+                  onChange={(e) => setNewModelName(e.target.value)}
+                  placeholder={llm.providers[newModelProvider].model || 'model-name'}
+                  className="font-mono text-xs h-8"
+                  list="per-model-datalist"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleAddModelInstruction() }}
+                />
+                <datalist id="per-model-datalist">
+                  {getModelsForProvider(newModelProvider).map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
+              </div>
+              <Button variant="secondary" size="sm" className="h-8 gap-1 shrink-0" disabled={!newModelName.trim()} onClick={handleAddModelInstruction}>
                 <Plus className="h-3 w-3" /> Add
               </Button>
             </div>
+
+            {Object.entries(modelInstructions).length === 0 && (
+              <p className="text-xs text-slate-600 italic">No per-model instructions configured yet.</p>
+            )}
+            {Object.entries(modelInstructions).map(([key, text]) => {
+              const [providerPart, ...rest] = key.split(':')
+              const modelPart = rest.join(':')
+              const providerLabel = PROVIDER_LABELS[providerPart as LLMProvider] ?? providerPart
+              return (
+                <div key={key} className="rounded border border-slate-700/60 bg-slate-900/30">
+                  <div className="flex items-center gap-2 px-3 py-2">
+                    <span className="flex-1 text-xs font-medium text-slate-300">
+                      <span className="text-slate-500">{providerLabel}:</span> <span className="font-mono text-slate-200">{modelPart}</span>
+                    </span>
+                    <button className="text-slate-500 hover:text-red-400 transition-colors" onClick={() => setModelInstruction(key, '')} title="Remove">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                  <div className="px-3 pb-3">
+                    <Textarea value={text} onChange={(e) => setModelInstruction(key, e.target.value)} placeholder={`Custom instructions for ${key}…`} className="resize-none h-16 text-sm font-mono" />
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
+
+        {/* System Prompt Preview */}
+        <div className="rounded-lg border border-slate-700/50 bg-slate-900/20">
+          <button className="flex items-center gap-1.5 px-4 py-3 text-xs text-slate-400 hover:text-slate-200 w-full text-left font-medium" onClick={() => setSystemPromptOpen(!systemPromptOpen)}>
+            {systemPromptOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            System Prompt Preview
+          </button>
+          {systemPromptOpen && (
+            <div className="px-4 pb-4">
+              {selectedNode ? (
+                <pre className="text-xs text-slate-500 whitespace-pre-wrap max-h-60 overflow-y-auto bg-slate-900/50 rounded p-2 font-mono">
+                  {buildLLMSystemPrompt(selectedNode)}
+                </pre>
+              ) : (
+                <p className="text-xs text-slate-600 italic">Select a node to preview the system prompt.</p>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* System Prompt Preview */}
-      <div className="rounded-lg border border-slate-700 bg-slate-800/30">
-        <button
-          className="flex items-center gap-1.5 px-4 py-3 text-xs text-slate-400 hover:text-slate-200 w-full text-left font-medium"
-          onClick={() => setSystemPromptOpen(!systemPromptOpen)}
-        >
-          {systemPromptOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-          System Prompt Preview
-        </button>
-        {systemPromptOpen && (
-          <div className="px-4 pb-4">
-            {selectedNode ? (
-              <pre className="text-xs text-slate-500 whitespace-pre-wrap max-h-60 overflow-y-auto bg-slate-900/50 rounded p-2 font-mono">
-                {buildLLMSystemPrompt(selectedNode)}
-              </pre>
-            ) : (
-              <p className="text-xs text-slate-600 italic">Select a node to preview the system prompt.</p>
-            )}
-          </div>
-        )}
+      {/* ================================================================
+          Context History
+          ================================================================ */}
+      <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-4 space-y-3">
+        <Label className="text-sm font-semibold text-slate-200">Context History</Label>
+        <p className="text-xs text-muted-foreground">How many recent messages to include in each AI request for multi-turn context.</p>
+        <div className="flex items-center gap-3">
+          <Input
+            type="number" min={0} max={50}
+            value={contextMessageCount}
+            onChange={(e) => { const n = parseInt(e.target.value, 10); if (!isNaN(n) && n >= 0 && n <= 50) setContextMessageCount(n) }}
+            className="w-20"
+          />
+          <span className="text-xs text-slate-500">messages (0 = current message only)</span>
+        </div>
       </div>
     </div>
   )

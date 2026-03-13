@@ -8,7 +8,7 @@ declare global {
       loadProject: () => Promise<{ project: Project; filePath: string } | null>
       exportCode: (
         nodes: ComfyNodeDef[],
-        mode: 'single' | 'package',
+        mode: 'individual' | 'package',
         projectName: string
       ) => Promise<void>
 
@@ -17,6 +17,7 @@ declare global {
       abortLLM: (requestId: string) => Promise<void>
       testConnection: (provider: LLMProvider, model: string, baseUrl?: string) => Promise<boolean>
       fetchOllamaModels: (baseUrl: string) => Promise<string[]>
+      fetchGroqModels: () => Promise<string[]>
 
       saveApiKey: (provider: LLMProvider, key: string) => Promise<void>
       getApiKeyStatus: () => Promise<Record<string, boolean>>
@@ -29,6 +30,14 @@ declare global {
       loadProjectFromPath: (filePath: string) => Promise<{ project: Project; filePath: string } | null>
       importNodeFolder: () => Promise<any[]>
       importNodeFile: () => Promise<any[]>
+
+      selectExportFolder: () => Promise<string | null>
+      exportToPath: (nodes: ComfyNodeDef[], packName: string, exportPath: string) => Promise<string>
+
+      showConfirmDialog: (message: string, detail?: string) => Promise<boolean>
+
+      onCheckClose: (handler: () => void) => void
+      forceClose: () => void
     }
   }
 }

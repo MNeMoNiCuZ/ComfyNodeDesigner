@@ -5,7 +5,9 @@
       "Bash(npx tsc:*)",
       "WebSearch",
       "Bash(npm test:*)",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(gh pr:*)",
+      "Bash(echo:*)"
     ]
   }
 }

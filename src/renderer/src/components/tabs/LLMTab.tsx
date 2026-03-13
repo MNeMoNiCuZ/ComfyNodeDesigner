@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import type { ComfyNodeDef, ComfyType, NodeInput, NodeOutput } from '../../types/node.types'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import type { ComfyNodeDef } from '../../types/node.types'
 import type { ChatMessage } from '../../types/llm.types'
 import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
@@ -8,6 +8,12 @@ import { Textarea } from '../ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
 import { buildLLMSystemPrompt, generateAllFiles } from '../../../../main/generators/codeGenerator'
 import { PROVIDER_LABELS, DEFAULT_MODELS } from '../../types/llm.types'
+import {
+  applyOperations,
+  validateAndTagOperations,
+  diffOperationsAgainstNode
+} from '../../lib/nodeOperations'
+import type { NodeInput, NodeOutput } from '../../types/node.types'
 import {
   Loader2,
   Wand2,
@@ -21,8 +27,9 @@ import {
   Copy,
   Code2,
   Trash2,
-  Eye,
-  EyeOff
+  Undo2,
+  ChevronsDownUp,
+  ChevronsUpDown
 } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
@@ -31,15 +38,6 @@ interface LLMTabProps {
 }
 
 type EditMode = 'execute' | 'fullnode'
-
-const VALID_COMFY_TYPES = new Set([
-  'IMAGE', 'LATENT', 'CONDITIONING', 'MODEL', 'VAE', 'CLIP', 'MASK',
-  'CONTROL_NET', 'STYLE_MODEL', 'CLIP_VISION', 'CLIP_VISION_OUTPUT',
-  'UPSCALE_MODEL', 'SAMPLER', 'SIGMAS', 'GUIDER', 'NOISE', 'GLIGEN',
-  'AUDIO', 'INT', 'FLOAT', 'STRING', 'BOOLEAN', 'SEED', 'COMBO', '*'
-])
-
-const WIDGET_INPUT_TYPES = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -56,218 +54,6 @@ function copyToClipboard(text: string): void {
 }
 
 // ---------------------------------------------------------------------------
-// Operations-based apply (Functionality Edit mode)
-// ---------------------------------------------------------------------------
-
-interface OperationResult {
-  updates: Partial<ComfyNodeDef>
-  summary: string
-}
-
-function applyOperations(
-  node: ComfyNodeDef,
-  operations: any[]
-): OperationResult | { error: string } {
-  const inputs = [...node.inputs.map((i) => ({ ...i }))]
-  const outputs = [...node.outputs.map((o) => ({ ...o }))]
-  let executeBody = node.executeBody
-  const changes: string[] = []
-
-  for (const op of operations) {
-    if (!op || !op.op) {
-      return { error: `Invalid operation: missing "op" field` }
-    }
-
-    switch (op.op) {
-      case 'add_input': {
-        if (!op.name || typeof op.name !== 'string') {
-          return { error: `add_input: missing "name"` }
-        }
-        const type = String(op.type ?? 'IMAGE').toUpperCase()
-        if (!VALID_COMFY_TYPES.has(type)) {
-          return {
-            error: `add_input "${op.name}": invalid type "${op.type}". Valid: ${[...VALID_COMFY_TYPES].join(', ')}`
-          }
-        }
-        const isWidget = WIDGET_INPUT_TYPES.has(type)
-        const forceInput = op.forceInput !== undefined ? Boolean(op.forceInput) : !isWidget
-        let widget: NodeInput['widget'] | undefined
-        if (op.widget && typeof op.widget === 'object') {
-          widget = {}
-          if (op.widget.min !== undefined) widget.min = Number(op.widget.min)
-          if (op.widget.max !== undefined) widget.max = Number(op.widget.max)
-          if (op.widget.step !== undefined) widget.step = Number(op.widget.step)
-          if (op.widget.default !== undefined) widget.default = op.widget.default
-          if (op.widget.multiline !== undefined) widget.multiline = Boolean(op.widget.multiline)
-          if (Array.isArray(op.widget.comboOptions)) widget.comboOptions = op.widget.comboOptions
-        }
-        inputs.push({
-          id: crypto.randomUUID(),
-          name: op.name,
-          type: type as ComfyType,
-          required: op.required !== false,
-          forceInput,
-          widget,
-          tooltip: ''
-        })
-        changes.push(`+input "${op.name}"`)
-        break
-      }
-
-      case 'update_input': {
-        if (!op.name || typeof op.name !== 'string') {
-          return { error: `update_input: missing "name"` }
-        }
-        const idx = inputs.findIndex((i) => i.name === op.name)
-        if (idx === -1) {
-          return { error: `update_input: input "${op.name}" not found` }
-        }
-        const updates = op.updates ?? op
-        if (updates.type) {
-          const t = String(updates.type).toUpperCase()
-          if (!VALID_COMFY_TYPES.has(t)) {
-            return { error: `update_input "${op.name}": invalid type "${updates.type}"` }
-          }
-          inputs[idx].type = t as ComfyType
-        }
-        if (updates.required !== undefined) inputs[idx].required = Boolean(updates.required)
-        if (updates.forceInput !== undefined) inputs[idx].forceInput = Boolean(updates.forceInput)
-        if (updates.widget !== undefined) {
-          if (updates.widget && typeof updates.widget === 'object') {
-            const w: NodeInput['widget'] = {}
-            if (updates.widget.min !== undefined) w.min = Number(updates.widget.min)
-            if (updates.widget.max !== undefined) w.max = Number(updates.widget.max)
-            if (updates.widget.step !== undefined) w.step = Number(updates.widget.step)
-            if (updates.widget.default !== undefined) w.default = updates.widget.default
-            if (updates.widget.multiline !== undefined) w.multiline = Boolean(updates.widget.multiline)
-            if (Array.isArray(updates.widget.comboOptions))
-              w.comboOptions = updates.widget.comboOptions
-            inputs[idx].widget = w
-          } else {
-            inputs[idx].widget = undefined
-          }
-        }
-        changes.push(`~input "${op.name}"`)
-        break
-      }
-
-      case 'delete_input': {
-        if (!op.name || typeof op.name !== 'string') {
-          return { error: `delete_input: missing "name"` }
-        }
-        const before = inputs.length
-        const filtered = inputs.filter((i) => i.name !== op.name)
-        if (filtered.length === before) {
-          return { error: `delete_input: input "${op.name}" not found` }
-        }
-        inputs.length = 0
-        inputs.push(...filtered)
-        changes.push(`-input "${op.name}"`)
-        break
-      }
-
-      case 'add_output': {
-        if (!op.name || typeof op.name !== 'string') {
-          return { error: `add_output: missing "name"` }
-        }
-        const type = String(op.type ?? 'IMAGE').toUpperCase()
-        if (!VALID_COMFY_TYPES.has(type)) {
-          return {
-            error: `add_output "${op.name}": invalid type "${op.type}". Valid: ${[...VALID_COMFY_TYPES].join(', ')}`
-          }
-        }
-        outputs.push({
-          id: crypto.randomUUID(),
-          name: op.name,
-          type: type as ComfyType,
-          tooltip: ''
-        })
-        changes.push(`+output "${op.name}"`)
-        break
-      }
-
-      case 'update_output': {
-        if (!op.name || typeof op.name !== 'string') {
-          return { error: `update_output: missing "name"` }
-        }
-        const idx = outputs.findIndex((o) => o.name === op.name)
-        if (idx === -1) {
-          return { error: `update_output: output "${op.name}" not found` }
-        }
-        const updates = op.updates ?? op
-        if (updates.type) {
-          const t = String(updates.type).toUpperCase()
-          if (!VALID_COMFY_TYPES.has(t)) {
-            return { error: `update_output "${op.name}": invalid type "${updates.type}"` }
-          }
-          outputs[idx].type = t as ComfyType
-        }
-        if (updates.name && typeof updates.name === 'string') {
-          outputs[idx].name = updates.name
-        }
-        changes.push(`~output "${op.name}"`)
-        break
-      }
-
-      case 'delete_output': {
-        if (!op.name || typeof op.name !== 'string') {
-          return { error: `delete_output: missing "name"` }
-        }
-        const before = outputs.length
-        const filtered = outputs.filter((o) => o.name !== op.name)
-        if (filtered.length === before) {
-          return { error: `delete_output: output "${op.name}" not found` }
-        }
-        outputs.length = 0
-        outputs.push(...filtered)
-        changes.push(`-output "${op.name}"`)
-        break
-      }
-
-      case 'set_code': {
-        if (typeof op.code !== 'string') {
-          return { error: `set_code: missing "code" string` }
-        }
-        executeBody = op.code
-        changes.push('code')
-        break
-      }
-
-      case 'set_identity': {
-        // Allows updating identity fields: displayName, internalName, category, description, functionName, usePackFolder
-        const identityUpdates: Partial<ComfyNodeDef> = {}
-        if (typeof op.displayName === 'string') identityUpdates.displayName = op.displayName
-        if (typeof op.internalName === 'string') identityUpdates.internalName = op.internalName
-        if (typeof op.category === 'string') identityUpdates.category = op.category
-        if (typeof op.description === 'string') identityUpdates.description = op.description
-        if (typeof op.functionName === 'string') identityUpdates.functionName = op.functionName
-        if (typeof op.usePackFolder === 'boolean') identityUpdates.usePackFolder = op.usePackFolder
-        Object.assign(node, identityUpdates) // mutate local copy for change tracking
-        changes.push(`identity(${Object.keys(identityUpdates).join(', ')})`)
-        return { updates: { inputs, outputs, executeBody, ...identityUpdates }, summary: changes.join(', ') }
-      }
-
-      case 'set_advanced': {
-        const advancedUpdates: Partial<ComfyNodeDef> = {}
-        if (typeof op.isOutputNode === 'boolean') advancedUpdates.isOutputNode = op.isOutputNode
-        if (typeof op.isInputNode === 'boolean') advancedUpdates.isInputNode = op.isInputNode
-        if (typeof op.validateInputs === 'boolean') advancedUpdates.validateInputs = op.validateInputs
-        if (op.isChangedMode !== undefined && ['none', 'always', 'hash'].includes(String(op.isChangedMode))) {
-          advancedUpdates.isChangedMode = op.isChangedMode as 'none' | 'always' | 'hash'
-        }
-        changes.push(`advanced(${Object.keys(advancedUpdates).join(', ')})`)
-        return { updates: { inputs, outputs, executeBody, ...advancedUpdates }, summary: changes.join(', ') }
-      }
-
-      default:
-        return { error: `Unknown operation type: "${op.op}"` }
-    }
-  }
-
-  return { updates: { inputs, outputs, executeBody }, summary: changes.join(', ') }
-}
-
-// ---------------------------------------------------------------------------
 // Full Code parser (simplified)
 // ---------------------------------------------------------------------------
 
@@ -276,6 +62,15 @@ interface ParsedFullCode {
   outputs: NodeOutput[]
   executeBody: string
 }
+
+const VALID_COMFY_TYPES_LOCAL = new Set([
+  'IMAGE', 'LATENT', 'CONDITIONING', 'MODEL', 'VAE', 'CLIP', 'MASK',
+  'CONTROL_NET', 'STYLE_MODEL', 'CLIP_VISION', 'CLIP_VISION_OUTPUT',
+  'UPSCALE_MODEL', 'SAMPLER', 'SIGMAS', 'GUIDER', 'NOISE', 'GLIGEN',
+  'AUDIO', 'INT', 'FLOAT', 'STRING', 'BOOLEAN', 'SEED', 'COMBO', '*'
+])
+
+const WIDGET_INPUT_TYPES_LOCAL = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
 
 function parseFullCodeResponse(
   text: string,
@@ -293,12 +88,10 @@ function parseFullCodeResponse(
   )
   if (inputTypesMatch) {
     const block = inputTypesMatch[1]
-    // Find required and optional blocks
     const requiredMatch = block.match(/"required"\s*:\s*\{([\s\S]*?)\}/)
     const optionalMatch = block.match(/"optional"\s*:\s*\{([\s\S]*?)\}/)
 
     const parseInputBlock = (content: string, required: boolean): void => {
-      // Match patterns like "name": ("TYPE", ...) or "name": ([options], ...)
       const inputPattern = /"(\w+)"\s*:\s*\((\[[\s\S]*?\]|"[^"]*")/g
       let m: RegExpExecArray | null
       while ((m = inputPattern.exec(content)) !== null) {
@@ -318,13 +111,13 @@ function parseFullCodeResponse(
           type = m[2].replace(/"/g, '').toUpperCase()
         }
 
-        if (!VALID_COMFY_TYPES.has(type)) continue
+        if (!VALID_COMFY_TYPES_LOCAL.has(type)) continue
 
-        const isWidget = WIDGET_INPUT_TYPES.has(type)
+        const isWidget = WIDGET_INPUT_TYPES_LOCAL.has(type)
         const input: NodeInput = {
           id: crypto.randomUUID(),
           name,
-          type: type as ComfyType,
+          type: type as any,
           required,
           forceInput: !isWidget,
           tooltip: ''
@@ -354,11 +147,11 @@ function parseFullCodeResponse(
 
     types.forEach((type, i) => {
       const t = type.toUpperCase()
-      if (VALID_COMFY_TYPES.has(t)) {
+      if (VALID_COMFY_TYPES_LOCAL.has(t)) {
         outputs.push({
           id: crypto.randomUUID(),
           name: names[i] ?? `output_${i}`,
-          type: t as ComfyType,
+          type: t as any,
           tooltip: ''
         })
       }
@@ -375,10 +168,7 @@ function parseFullCodeResponse(
   let executeBody = node.executeBody
 
   if (funcMatch) {
-    // Get body lines — everything until we hit a line that's not indented with at least 8 spaces
-    // or an empty line, up to the next class-level def or end of class
     const rawBody = funcMatch[1]
-    // Trim trailing empty lines
     executeBody = rawBody.replace(/\s+$/, '')
     if (!executeBody.trim()) {
       executeBody = '        pass'
@@ -416,7 +206,6 @@ function extractJsonObject(text: string): string | null {
 function buildFunctionalityEditPrompt(node: ComfyNodeDef): string {
   const base = buildLLMSystemPrompt(node)
 
-  // Also generate full code for reference
   const fullCode = generateAllFiles([node], 'node').singleFilePy
 
   const identityContext = `
@@ -432,7 +221,13 @@ CURRENT NODE IDENTITY & SETTINGS:
   isChangedMode: "${node.isChangedMode}"
   usePackFolder: ${node.usePackFolder ?? false}`
 
-  return `${base}${identityContext}
+  const existingInputNames = node.inputs.map((i) => `"${i.name}"`).join(', ') || 'none'
+  const existingOutputNames = node.outputs.map((o) => `"${o.name}"`).join(', ') || 'none'
+
+  const defaultNameWarning = `
+IMPORTANT: If the node has default or placeholder values (displayName is "My Custom Node", "New Node", or empty; description is empty; category is empty or "custom"), you MUST include a set_identity operation to give the node a proper name, category, and description based on what the user is asking you to build.`
+
+  return `${base}${identityContext}${defaultNameWarning}
 
 ---
 
@@ -443,6 +238,13 @@ ${fullCode}
 \`\`\`
 
 ---
+
+CRITICAL RULE: Do NOT use add_input for inputs already listed above. Do NOT use add_output for outputs already listed above.
+If you want to modify an existing input, use update_input. If you want to modify an existing output, use update_output.
+Adding an item that already exists will fail validation.
+
+EXISTING INPUTS: ${existingInputNames}
+EXISTING OUTPUTS: ${existingOutputNames}
 
 You can modify this node by returning a JSON object with an "operations" array.
 
@@ -556,7 +358,6 @@ function summarizeOperations(operations: any[]): string {
 function buildApplyButtonLabel(content: string, mode: EditMode): string {
   if (mode === 'fullnode') return 'Apply Full Code'
 
-  // Try to parse operations and build summary
   const jsonStr = extractJsonObject(content)
   if (!jsonStr) return 'Apply Changes'
 
@@ -672,148 +473,232 @@ function AssistantMessage({
         const parsed = JSON.parse(jsonStr)
         if (Array.isArray(parsed.operations)) {
           const isThisPreview = pendingProposal?.messageId === messageId
-          return (
-            <div className="space-y-2">
-              <div className="text-sm text-slate-300">
-                <p className="font-medium text-slate-200 mb-1">Proposed changes:</p>
-                <ul className="list-none space-y-1 text-slate-400">
-                  {parsed.operations.map((op: any, i: number) => (
-                    <li key={i} className="text-xs">
-                      <div className="flex items-start gap-1">
-                        <button
-                          className="mt-0.5 shrink-0 text-slate-600 hover:text-slate-400"
-                          onClick={() => toggleOpExpand(i)}
-                          title={expandedOps.has(i) ? 'Collapse' : 'Expand JSON'}
-                        >
-                          {expandedOps.has(i) ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                        </button>
+
+          // Only diff against current node state when this is the active pending proposal.
+          // For historical messages, always show the original operations so accepted proposals
+          // don't collapse to "No new changes" after the node has been updated.
+          const opsToShow = (isThisPreview && node)
+            ? diffOperationsAgainstNode(node, parsed.operations)
+            : parsed.operations
+          const taggedOps = node
+            ? validateAndTagOperations(node, opsToShow)
+            : opsToShow.map((op: any) => ({ ...op, _invalid: false }))
+
+          const validOps = taggedOps.filter((op: any) => !op._invalid)
+          const invalidOps = taggedOps.filter((op: any) => op._invalid)
+          const allValid = invalidOps.length === 0
+          const allInvalid = validOps.length === 0
+
+          // Group valid ops by category
+          const groupDefs: Array<{ label: string; opTypes: string[] }> = [
+            { label: 'Node Settings', opTypes: ['set_identity'] },
+            { label: 'Inputs', opTypes: ['add_input', 'update_input', 'delete_input'] },
+            { label: 'Outputs', opTypes: ['add_output', 'update_output', 'delete_output'] },
+            { label: 'Advanced', opTypes: ['set_advanced'] },
+            { label: 'Functionality', opTypes: ['set_code'] },
+          ]
+
+          // Map from original taggedOps index to group
+          const opToGroup = new Map<number, string>()
+          taggedOps.forEach((op: any, i: number) => {
+            if (!op._invalid) {
+              const grp = groupDefs.find((g) => g.opTypes.includes(op.op))
+              if (grp) opToGroup.set(i, grp.label)
+            }
+          })
+
+          function renderOpItem(op: any, i: number): JSX.Element {
+            return (
+              <li key={i} className={cn(
+                'text-xs rounded px-1.5 py-0.5',
+                op._invalid && 'bg-red-950/30 border border-red-900/40'
+              )}>
+                <div className="flex items-start gap-1">
+                  <button
+                    className="mt-0.5 shrink-0 text-slate-600 hover:text-slate-400"
+                    onClick={() => toggleOpExpand(i)}
+                    title={expandedOps.has(i) ? 'Collapse' : 'Expand JSON'}
+                  >
+                    {expandedOps.has(i) ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  </button>
+                  {/* Valid/invalid indicator */}
+                  {op._invalid ? (
+                    <span className="shrink-0 text-red-400 mt-0.5"><AlertCircle className="h-3 w-3" /></span>
+                  ) : (
+                    <span className="shrink-0 text-green-500 mt-0.5"><Check className="h-3 w-3" /></span>
+                  )}
                         <span className="flex-1">
-                      {(() => {
-                        switch (op.op) {
-                          case 'add_input':
-                            return (
-                              <span>
-                                Add input <code className="text-blue-400">"{op.name}"</code>{' '}
-                                <span className="text-slate-500">({op.type ?? 'IMAGE'})</span>
-                              </span>
-                            )
-                          case 'update_input': {
-                            const existing = node?.inputs.find((inp) => inp.name === op.name)
-                            const updates = op.updates ?? op
-                            return (
-                              <span className="flex flex-col gap-0.5 mt-0.5">
-                                <span>Update input <code className="text-yellow-400">"{op.name}"</code></span>
-                                {existing && (
+                        {(() => {
+                          switch (op.op) {
+                            case 'add_input':
+                              return (
+                                <span>
+                                  Add input <code className="text-blue-400">"{op.name}"</code>{' '}
+                                  <span className="text-slate-500">({op.type ?? 'IMAGE'})</span>
+                                </span>
+                              )
+                            case 'update_input': {
+                              const existing = node?.inputs.find((inp) => inp.name === op.name)
+                              const updates = op.updates ?? op
+                              return (
+                                <span className="flex flex-col gap-0.5 mt-0.5">
+                                  <span>Update input <code className="text-yellow-400">"{op.name}"</code></span>
+                                  {existing && (
+                                    <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
+                                      {updates.type && <DiffRow label="type" oldVal={existing.type} newVal={updates.type} />}
+                                      {updates.required !== undefined && <DiffRow label="required" oldVal={existing.required} newVal={updates.required} />}
+                                      {updates.forceInput !== undefined && <DiffRow label="forceInput" oldVal={existing.forceInput} newVal={updates.forceInput} />}
+                                    </span>
+                                  )}
+                                </span>
+                              )
+                            }
+                            case 'delete_input':
+                              return (
+                                <span>
+                                  Delete input <code className="text-red-400">"{op.name}"</code>
+                                </span>
+                              )
+                            case 'add_output':
+                              return (
+                                <span>
+                                  Add output <code className="text-blue-400">"{op.name}"</code>{' '}
+                                  <span className="text-slate-500">({op.type ?? 'IMAGE'})</span>
+                                </span>
+                              )
+                            case 'update_output': {
+                              const existing = node?.outputs.find((o) => o.name === op.name)
+                              const updates = op.updates ?? op
+                              return (
+                                <span className="flex flex-col gap-0.5 mt-0.5">
+                                  <span>Update output <code className="text-yellow-400">"{op.name}"</code></span>
+                                  {existing && updates.type && (
+                                    <span className="ml-3 text-[10px]">
+                                      <DiffRow label="type" oldVal={existing.type} newVal={updates.type} />
+                                    </span>
+                                  )}
+                                </span>
+                              )
+                            }
+                            case 'delete_output':
+                              return (
+                                <span>
+                                  Delete output <code className="text-red-400">"{op.name}"</code>
+                                </span>
+                              )
+                            case 'set_code':
+                              return <span>Update function code</span>
+                            case 'set_identity': {
+                              const fields = ['displayName', 'internalName', 'category', 'description', 'functionName', 'usePackFolder'] as const
+                              const changed = fields.filter((f) => op[f] !== undefined)
+                              return (
+                                <span className="flex flex-col gap-0.5 mt-0.5">
+                                  <span>Update Node Settings</span>
                                   <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
-                                    {updates.type && <DiffRow label="type" oldVal={existing.type} newVal={updates.type} />}
-                                    {updates.required !== undefined && <DiffRow label="required" oldVal={existing.required} newVal={updates.required} />}
-                                    {updates.forceInput !== undefined && <DiffRow label="forceInput" oldVal={existing.forceInput} newVal={updates.forceInput} />}
+                                    {changed.map((f) => (
+                                      <DiffRow key={f} label={f} oldVal={node?.[f]} newVal={op[f]} />
+                                    ))}
                                   </span>
-                                )}
-                              </span>
-                            )
-                          }
-                          case 'delete_input':
-                            return (
-                              <span>
-                                Delete input <code className="text-red-400">"{op.name}"</code>
-                              </span>
-                            )
-                          case 'add_output':
-                            return (
-                              <span>
-                                Add output <code className="text-blue-400">"{op.name}"</code>{' '}
-                                <span className="text-slate-500">({op.type ?? 'IMAGE'})</span>
-                              </span>
-                            )
-                          case 'update_output': {
-                            const existing = node?.outputs.find((o) => o.name === op.name)
-                            const updates = op.updates ?? op
-                            return (
-                              <span className="flex flex-col gap-0.5 mt-0.5">
-                                <span>Update output <code className="text-yellow-400">"{op.name}"</code></span>
-                                {existing && updates.type && (
-                                  <span className="ml-3 text-[10px]">
-                                    <DiffRow label="type" oldVal={existing.type} newVal={updates.type} />
+                                </span>
+                              )
+                            }
+                            case 'set_advanced': {
+                              const fields = ['isOutputNode', 'isInputNode', 'validateInputs', 'isChangedMode'] as const
+                              const changed = fields.filter((f) => op[f] !== undefined)
+                              return (
+                                <span className="flex flex-col gap-0.5 mt-0.5">
+                                  <span>Update advanced settings</span>
+                                  <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
+                                    {changed.map((f) => (
+                                      <DiffRow key={f} label={f} oldVal={node?.[f]} newVal={op[f]} />
+                                    ))}
                                   </span>
-                                )}
-                              </span>
-                            )
-                          }
-                          case 'delete_output':
-                            return (
-                              <span>
-                                Delete output <code className="text-red-400">"{op.name}"</code>
-                              </span>
-                            )
-                          case 'set_code':
-                            return <span>Update function code</span>
-                          case 'set_identity': {
-                            const fields = ['displayName', 'internalName', 'category', 'description', 'functionName', 'usePackFolder'] as const
-                            const changed = fields.filter((f) => op[f] !== undefined)
-                            return (
-                              <span className="flex flex-col gap-0.5 mt-0.5">
-                                <span>Update identity</span>
-                                <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
-                                  {changed.map((f) => (
-                                    <DiffRow key={f} label={f} oldVal={node?.[f]} newVal={op[f]} />
-                                  ))}
                                 </span>
-                              </span>
-                            )
+                              )
+                            }
+                            default:
+                              return <span className="text-slate-600">Unknown operation: {op.op}</span>
                           }
-                          case 'set_advanced': {
-                            const fields = ['isOutputNode', 'isInputNode', 'validateInputs', 'isChangedMode'] as const
-                            const changed = fields.filter((f) => op[f] !== undefined)
-                            return (
-                              <span className="flex flex-col gap-0.5 mt-0.5">
-                                <span>Update advanced settings</span>
-                                <span className="ml-3 flex flex-col gap-0.5 text-[10px]">
-                                  {changed.map((f) => (
-                                    <DiffRow key={f} label={f} oldVal={node?.[f]} newVal={op[f]} />
-                                  ))}
-                                </span>
-                              </span>
-                            )
-                          }
-                          default:
-                            return <span className="text-slate-600">Unknown operation: {op.op}</span>
-                        }
-                      })()}
+                        })()}
                         </span>
                       </div>
+                      {/* Error message for invalid op */}
+                      {op._invalid && op._error && (
+                        <p className="ml-7 mt-0.5 text-[10px] text-red-400">{op._error}</p>
+                      )}
                       {expandedOps.has(i) && (
                         <pre className="mt-1 ml-4 bg-slate-900 rounded p-2 text-[10px] font-mono text-slate-400 overflow-x-auto whitespace-pre-wrap max-h-32 overflow-y-auto">
                           {JSON.stringify(op, null, 2)}
                         </pre>
                       )}
                     </li>
-                  ))}
-                </ul>
+                )
+          }
+
+          const allExpanded = taggedOps.length > 0 && taggedOps.every((_: any, i: number) => expandedOps.has(i))
+
+          return (
+            <div className="space-y-2">
+              {/* Status header */}
+              <div className={cn(
+                'flex items-center gap-2 text-xs font-medium px-2 py-1 rounded',
+                allValid && 'text-green-300 bg-green-900/20',
+                allInvalid && 'text-red-300 bg-red-900/20',
+                !allValid && !allInvalid && 'text-amber-300 bg-amber-900/20'
+              )}>
+                {allValid && <Check className="h-3 w-3" />}
+                {allInvalid && <AlertCircle className="h-3 w-3" />}
+                {!allValid && !allInvalid && <AlertCircle className="h-3 w-3" />}
+                {allValid && `${validOps.length} valid change${validOps.length !== 1 ? 's' : ''}`}
+                {allInvalid && `All ${invalidOps.length} operation${invalidOps.length !== 1 ? 's' : ''} failed to validate`}
+                {!allValid && !allInvalid && `${validOps.length} valid, ${invalidOps.length} failed`}
+                <button
+                  className="ml-auto inline-flex items-center gap-1 text-[10px] text-slate-500 hover:text-slate-300 transition-colors"
+                  onClick={() => {
+                    if (allExpanded) {
+                      setExpandedOps(new Set())
+                    } else {
+                      setExpandedOps(new Set(taggedOps.map((_: any, i: number) => i)))
+                    }
+                  }}
+                  title={allExpanded ? 'Collapse all' : 'Expand all changes'}
+                >
+                  {allExpanded ? <ChevronsDownUp className="h-3 w-3" /> : <ChevronsUpDown className="h-3 w-3" />}
+                  {allExpanded ? 'Collapse all' : 'Expand all'}
+                </button>
               </div>
-              {node && onSetPendingProposal && messageId && (
-                <div className="flex items-center gap-2">
-                  <button
-                    className={cn(
-                      'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded transition-colors',
-                      isThisPreview
-                        ? 'text-blue-300 bg-blue-900/40 hover:bg-blue-900/60'
-                        : 'text-slate-400 hover:text-slate-200 hover:bg-slate-700/50'
-                    )}
-                    onClick={() => {
-                      if (isThisPreview) {
-                        onSetPendingProposal(null)
-                      } else {
-                        onSetPendingProposal({ nodeId: node.id, messageId, operations: parsed.operations })
-                      }
-                    }}
-                    title={isThisPreview ? 'Clear preview from Inputs/Outputs tabs' : 'Preview changes in Inputs/Outputs tabs'}
-                  >
-                    {isThisPreview ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
-                    {isThisPreview ? 'Clear Preview' : 'Preview in Tabs'}
-                  </button>
-                </div>
-              )}
+
+              <div className="text-sm text-slate-300 space-y-2">
+                {groupDefs.map((grp) => {
+                  const grpOps = taggedOps
+                    .map((op: any, i: number) => ({ op, i }))
+                    .filter(({ op, i: idx }) => !op._invalid && opToGroup.get(idx) === grp.label)
+                  if (grpOps.length === 0) return null
+                  return (
+                    <div key={grp.label}>
+                      <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">
+                        {grp.label} — {grpOps.length} change{grpOps.length !== 1 ? 's' : ''}
+                      </p>
+                      <ul className="list-none space-y-1 text-slate-400">
+                        {grpOps.map(({ op, i: idx }) => renderOpItem(op, idx))}
+                      </ul>
+                    </div>
+                  )
+                })}
+                {invalidOps.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-red-500 mb-1">
+                      Failed — {invalidOps.length} operation{invalidOps.length !== 1 ? 's' : ''}
+                    </p>
+                    <ul className="list-none space-y-1 text-slate-400">
+                      {taggedOps
+                        .map((op: any, i: number) => ({ op, i }))
+                        .filter(({ op }) => op._invalid)
+                        .map(({ op, i: idx }) => renderOpItem(op, idx))}
+                    </ul>
+                  </div>
+                )}
+              </div>
               <div>
                 <button
                   className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300"
@@ -845,6 +730,30 @@ function AssistantMessage({
         // Fall through to default rendering
       }
     }
+
+    // Parse failed — show friendly message
+    return (
+      <div className="space-y-2">
+        <div className="flex items-start gap-1.5 text-xs text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded px-2 py-1.5">
+          <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+          <span>
+            The AI returned plain text instead of the expected JSON format. This can happen with weaker models. Try rephrasing your request or switch to a more capable model.
+          </span>
+        </div>
+        <button
+          className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-300"
+          onClick={() => setRawJsonOpen(!rawJsonOpen)}
+        >
+          {rawJsonOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+          Show raw response
+        </button>
+        {rawJsonOpen && (
+          <pre className="bg-slate-900 rounded p-3 text-xs font-mono text-slate-400 overflow-x-auto whitespace-pre-wrap max-h-48 overflow-y-auto">
+            {content}
+          </pre>
+        )}
+      </div>
+    )
   }
 
   // Full Code mode: render as code block with copy
@@ -913,7 +822,7 @@ function AssistantMessage({
 // ---------------------------------------------------------------------------
 
 export function LLMTab({ node }: LLMTabProps): JSX.Element {
-  const { updateNode, project } = useProjectStore()
+  const { updateNode, pushLLMSnapshot, popLLMSnapshot } = useProjectStore()
   const {
     llm,
     setActiveProvider,
@@ -941,6 +850,16 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [appliedMessageIds, setAppliedMessageIds] = useState<Set<string>>(new Set())
   const [systemPromptOpen, setSystemPromptOpen] = useState(false)
+  // Derived — no session state needed; the last assistant msg per mode is always "latest"
+  const latestExecuteId = useMemo(() => {
+    const a = executeMessages.filter(m => m.role === 'assistant')
+    return a.length > 0 ? a[a.length - 1].id : null
+  }, [executeMessages])
+  const latestFullnodeId = useMemo(() => {
+    const a = fullnodeMessages.filter(m => m.role === 'assistant')
+    return a.length > 0 ? a[a.length - 1].id : null
+  }, [fullnodeMessages])
+  const latestResponseId = { execute: latestExecuteId, fullnode: latestFullnodeId }
 
   const requestIdRef = useRef<string | null>(null)
   const startTimeRef = useRef<number>(0)
@@ -1082,15 +1001,55 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
       })
 
       const elapsed = Date.now() - startTimeRef.current
+
+      // Determine response status for execute mode; diff + auto-preview
+      let responseStatus: ChatMessage['responseStatus'] = 'ok'
+      let autoPreviewOps: any[] | null = null
+      if (currentMode === 'execute') {
+        const jsonStr = extractJsonObject(result)
+        if (!jsonStr) {
+          responseStatus = 'parse_failed'
+        } else {
+          try {
+            const parsed = JSON.parse(jsonStr)
+            if (Array.isArray(parsed.operations)) {
+              // Diff first — remove ops already reflected in node
+              const diffed = diffOperationsAgainstNode(node, parsed.operations)
+              const tagged = validateAndTagOperations(node, diffed)
+              const validOps = tagged.filter((op: any) => !op._invalid)
+              if (tagged.length === 0 || validOps.length === 0) {
+                responseStatus = 'all_invalid'
+              } else {
+                autoPreviewOps = tagged
+              }
+            } else {
+              responseStatus = 'parse_failed'
+            }
+          } catch {
+            responseStatus = 'parse_failed'
+          }
+        }
+      }
+
+      const assistantMsgId = generateId()
       const assistantMsg: ChatMessage = {
-        id: generateId(),
+        id: assistantMsgId,
         role: 'assistant',
         content: result,
         timestamp: Date.now(),
         elapsedMs: elapsed,
         mode: currentMode,
-        nodeId: currentNodeId
+        nodeId: currentNodeId,
+        responseStatus,
+        provider: llm.activeProvider,
+        model: activeConfig.model
       }
+
+      // Auto-activate preview for valid execute responses
+      if (autoPreviewOps) {
+        setPendingProposal({ nodeId: currentNodeId, messageId: assistantMsgId, operations: autoPreviewOps })
+      }
+
 
       if (currentMode === 'execute') {
         setExecuteMessages((prev) => {
@@ -1176,6 +1135,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
         ])
         return
       }
+      pushLLMSnapshot(node.id, node)
       updateNode(node.id, {
         inputs: result.inputs,
         outputs: result.outputs,
@@ -1226,7 +1186,24 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
         return
       }
 
-      const result = applyOperations(node, parsed.operations)
+      // Apply only valid ops (filter out _invalid tagged ops)
+      const tagged = validateAndTagOperations(node, parsed.operations)
+      const validOps = tagged.filter((op: any) => !op._invalid)
+
+      if (validOps.length === 0) {
+        setExecuteMessages((prev) => [
+          ...prev,
+          {
+            id: generateId(),
+            role: 'error',
+            content: 'Apply failed: no valid operations to apply.',
+            timestamp: Date.now()
+          }
+        ])
+        return
+      }
+
+      const result = applyOperations(node, validOps)
       if ('error' in result) {
         setExecuteMessages((prev) => [
           ...prev,
@@ -1240,9 +1217,19 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
         return
       }
 
+      pushLLMSnapshot(node.id, node)
       updateNode(node.id, result.updates)
     }
     setAppliedMessageIds((prev) => new Set(prev).add(msg.id))
+  }
+
+  function handleRevert(msg: ChatMessage): void {
+    popLLMSnapshot(node.id)
+    setAppliedMessageIds((prev) => {
+      const next = new Set(prev)
+      next.delete(msg.id)
+      return next
+    })
   }
 
   function isAlreadyApplied(msgId: string): boolean {
@@ -1412,18 +1399,21 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
           </div>
         )}
 
-        {messages.map((msg) => (
+        {messages.map((msg) => {
+          const isLatest = msg.role === 'assistant' && msg.id === latestResponseId[msg.mode ?? 'execute']
+          const isStale = msg.role === 'assistant' && !isLatest && !isAlreadyApplied(msg.id)
+          return (
           <div
             key={msg.id}
             className={cn(
-              'rounded-lg px-3 py-2 text-sm',
+              'relative rounded-lg px-3 py-2 text-sm',
               msg.role === 'user' && 'bg-blue-900/30 border border-blue-800/40 ml-8',
               msg.role === 'assistant' && 'bg-slate-800/50 border border-slate-700/50 mr-4',
               msg.role === 'error' && 'bg-red-900/20 border border-red-800/40'
             )}
           >
             {msg.role === 'error' ? (
-              <p className="flex items-start gap-1.5 text-xs text-red-400">
+              <p className="flex items-start gap-1.5 text-xs text-red-400 pr-5">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                 <span>
                   {msg.content}
@@ -1438,7 +1428,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
                 </span>
               </p>
             ) : msg.role === 'user' ? (
-              <p className="text-slate-200 whitespace-pre-wrap">{msg.content}</p>
+              <p className="text-slate-200 whitespace-pre-wrap pr-5">{msg.content}</p>
             ) : (
               <div>
                 <AssistantMessage
@@ -1450,29 +1440,43 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
                   onSetPendingProposal={setPendingProposal}
                 />
                 <div className="flex items-center gap-2 mt-2 pt-2 border-t border-slate-700/30">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className={cn(
-                      'h-6 gap-1 text-xs',
-                      isAlreadyApplied(msg.id)
-                        ? 'text-green-400'
-                        : 'text-slate-400 hover:text-slate-200'
-                    )}
-                    onClick={() => handleApply(msg)}
-                    disabled={isAlreadyApplied(msg.id)}
-                  >
-                    {isAlreadyApplied(msg.id) ? (
+                  {msg.mode === 'fullnode' ? (
+                    isAlreadyApplied(msg.id) ? (
                       <>
-                        <Check className="h-3 w-3" /> Applied
+                        <span className="inline-flex items-center gap-1 text-xs text-green-400 h-6 px-2">
+                          <Check className="h-3 w-3" /> Applied
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 gap-1 text-xs text-slate-500 hover:text-amber-400"
+                          onClick={() => handleRevert(msg)}
+                          title="Revert this change"
+                        >
+                          <Undo2 className="h-3 w-3" />
+                          Revert
+                        </Button>
                       </>
+                    ) : isStale ? (
+                      <span className="text-xs text-slate-600 italic">Superseded by newer response</span>
                     ) : (
-                      buildApplyButtonLabel(msg.content, msg.mode ?? editMode)
-                    )}
-                  </Button>
-                  <CopyButton text={msg.content} className="ml-1" />
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 gap-1 text-xs text-slate-400 hover:text-slate-200"
+                        onClick={() => handleApply(msg)}
+                      >
+                        Apply Full Code
+                      </Button>
+                    )
+                  ) : null}
+                  {msg.model && (
+                    <span className="text-[10px] text-slate-600 ml-auto truncate max-w-[12rem]" title={msg.model}>
+                      {msg.model}
+                    </span>
+                  )}
                   {msg.elapsedMs != null && (
-                    <span className="text-xs text-slate-600 ml-auto">
+                    <span className="text-[10px] text-slate-600 ml-1">
                       {(msg.elapsedMs / 1000).toFixed(1)}s
                     </span>
                   )}
@@ -1480,7 +1484,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
               </div>
             )}
           </div>
-        ))}
+          )
+        })}
 
         {generating && (
           <div className="bg-slate-800/30 border border-slate-700/30 rounded-lg px-3 py-2 mr-4">

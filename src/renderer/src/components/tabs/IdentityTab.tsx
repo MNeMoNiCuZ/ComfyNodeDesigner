@@ -4,6 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import type { ComfyNodeDef } from '../../types/node.types'
 import { useProjectStore } from '../../store/projectStore'
+import { useSettingsStore } from '../../store/settingsStore'
 import { Input } from '../ui/input'
 import { Textarea } from '../ui/textarea'
 import { Label } from '../ui/label'
@@ -108,7 +109,23 @@ function CategoryCombobox({ value, onChange, suggestions }: CategoryComboboxProp
 
 export function IdentityTab({ node }: IdentityTabProps): JSX.Element {
   const { updateNode, project } = useProjectStore()
+  const { pendingProposal } = useSettingsStore()
   const packName = (project.packName ?? 'ComfyUI_').replace(/[^a-zA-Z0-9_-]/g, '_')
+
+  // Find any set_identity op in the pending proposal for this node
+  const activeProposal = pendingProposal?.nodeId === node.id ? pendingProposal : null
+  const identityOp = activeProposal?.operations.find(
+    (op: any) => op.op === 'set_identity' && !op._invalid
+  ) ?? null
+
+  const IDENTITY_FIELD_LABELS: Record<string, string> = {
+    displayName: 'Display Name',
+    internalName: 'Internal Name',
+    category: 'Category',
+    description: 'Description',
+    functionName: 'Execute Function Name',
+    usePackFolder: 'Include in pack folder'
+  }
 
   // Track whether the internal name should auto-sync from the display name.
   // Starts true; flips to false when the user directly edits the internal name field.
@@ -181,6 +198,29 @@ export function IdentityTab({ node }: IdentityTabProps): JSX.Element {
 
   return (
     <div className="p-6 space-y-5 max-w-2xl">
+      {/* AI Proposal banner for set_identity */}
+      {identityOp && (
+        <div className="rounded-lg border border-amber-700/50 bg-amber-950/40 px-4 py-3 space-y-2">
+          <p className="text-xs font-semibold text-amber-300 uppercase tracking-wide">AI proposes Node Settings changes:</p>
+          <div className="space-y-1">
+            {(Object.keys(IDENTITY_FIELD_LABELS) as string[])
+              .filter((f) => identityOp[f] !== undefined)
+              .map((f) => {
+                const oldVal = String((node as any)[f] ?? '')
+                const newVal = String(identityOp[f] ?? '')
+                return (
+                  <div key={f} className="flex items-center gap-2 text-xs">
+                    <span className="text-amber-400 font-medium w-36 shrink-0">{IDENTITY_FIELD_LABELS[f]}:</span>
+                    <span className="text-slate-500 line-through truncate max-w-[120px]">{oldVal || '—'}</span>
+                    <span className="text-amber-200 shrink-0">→</span>
+                    <span className="text-amber-100 font-mono truncate">{newVal}</span>
+                  </div>
+                )
+              })}
+          </div>
+        </div>
+      )}
+
       <div className="space-y-1">
         <h2 className="text-base font-semibold text-slate-200">Node Identity</h2>
         <p className="text-xs text-muted-foreground">

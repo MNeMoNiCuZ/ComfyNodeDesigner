@@ -12,6 +12,8 @@ interface SettingsState {
   theme: 'dark' | 'light'
   ollamaModels: string[]
   ollamaFetched: boolean
+  groqModels: string[]
+  groqFetched: boolean
   customInstructions: string
   instructionScope: 'global' | 'provider' | 'model'
   providerInstructions: Partial<Record<string, string>>
@@ -26,6 +28,7 @@ interface SettingsState {
   chatHistories: Record<string, { execute: ChatMessage[]; fullnode: ChatMessage[] }>
   contextMessageCount: number
   pendingProposal: { nodeId: string; messageId: string; operations: any[] } | null
+  exportPath: string
 
   setActiveProvider: (provider: LLMProvider) => void
   setProviderModel: (provider: LLMProvider, model: string) => void
@@ -50,9 +53,11 @@ interface SettingsState {
   clearChatHistory: (nodeId: string) => void
   setContextMessageCount: (n: number) => void
   setPendingProposal: (proposal: { nodeId: string; messageId: string; operations: any[] } | null) => void
+  setExportPath: (path: string) => void
   loadFromMain: () => Promise<void>
   persistToMain: () => Promise<void>
   fetchOllamaModels: () => Promise<string[]>
+  fetchGroqModels: () => Promise<string[]>
 }
 
 function serializableSettings(
@@ -71,6 +76,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   theme: 'dark',
   ollamaModels: [],
   ollamaFetched: false,
+  groqModels: [],
+  groqFetched: false,
   customInstructions: '',
   instructionScope: 'provider',
   providerInstructions: {},
@@ -85,6 +92,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   chatHistories: {},
   contextMessageCount: 10,
   pendingProposal: null,
+  exportPath: '',
 
   setActiveProvider: (provider) => {
     set((state) => ({ llm: { ...state.llm, activeProvider: provider } }))
@@ -256,6 +264,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     set({ pendingProposal: proposal })
   },
 
+  setExportPath: (exportPath) => {
+    set({ exportPath })
+    get().persistToMain()
+  },
+
   loadFromMain: async () => {
     try {
       const saved = await window.electronAPI.getSettings()
@@ -305,6 +318,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           if (typeof saved.contextMessageCount === 'number') {
             update.contextMessageCount = saved.contextMessageCount
           }
+          if (typeof saved.exportPath === 'string') {
+            update.exportPath = saved.exportPath
+          }
           return { ...state, ...update }
         })
       }
@@ -328,7 +344,8 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           recentProjectsEnabled: state.recentProjectsEnabled,
           customModels: state.customModels,
           chatHistories: state.chatHistories,
-          contextMessageCount: state.contextMessageCount
+          contextMessageCount: state.contextMessageCount,
+          exportPath: state.exportPath
         })
       )
     } catch {
@@ -348,6 +365,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       return models
     } catch {
       set({ ollamaFetched: true })
+      return []
+    }
+  },
+
+  fetchGroqModels: async () => {
+    try {
+      const models = await window.electronAPI.fetchGroqModels()
+      set({ groqModels: models, groqFetched: true })
+      return models
+    } catch {
+      set({ groqFetched: true })
       return []
     }
   }

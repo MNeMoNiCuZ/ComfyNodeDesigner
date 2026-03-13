@@ -17,22 +17,23 @@ interface ExportModalProps {
   onClose: () => void
 }
 
-type ExportMode = 'single' | 'package'
+type ExportMode = 'individual' | 'package'
 
 export function ExportModal({ open, onClose }: ExportModalProps): JSX.Element {
   const { project } = useProjectStore()
-  const [mode, setMode] = useState<ExportMode>('single')
+  const [mode, setMode] = useState<ExportMode>('individual')
   const [exporting, setExporting] = useState(false)
 
+  const packName = project.packName ?? project.name
   const files = useMemo(
-    () => generateAllFiles(project.nodes, project.name),
-    [project.nodes, project.name]
+    () => generateAllFiles(project.nodes, packName, project.name),
+    [project.nodes, packName, project.name]
   )
 
   async function handleExport(): Promise<void> {
     setExporting(true)
     try {
-      await window.electronAPI.exportCode(project.nodes, mode, project.name)
+      await window.electronAPI.exportCode(project.nodes, mode, packName)
       onClose()
     } catch (e) {
       if ((e as Error).message !== 'Export cancelled') {
@@ -61,20 +62,20 @@ export function ExportModal({ open, onClose }: ExportModalProps): JSX.Element {
           <button
             className={cn(
               'flex flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors',
-              mode === 'single'
+              mode === 'individual'
                 ? 'border-blue-500 bg-blue-600/10 text-blue-300'
                 : 'border-slate-700 hover:border-slate-600 text-slate-300'
             )}
-            onClick={() => setMode('single')}
+            onClick={() => setMode('individual')}
           >
-            <FileCode className="h-6 w-6" />
+            <FolderOpen className="h-6 w-6" />
             <div>
-              <p className="text-sm font-semibold">Single .py file</p>
+              <p className="text-sm font-semibold">Individual files (recommended)</p>
               <p className="text-xs text-muted-foreground mt-0.5">
-                One file with all nodes + mappings. Drop directly into <code className="font-mono">custom_nodes/</code>.
+                Each node gets its own <code className="font-mono">.py</code> file. Clean structure, easy to manage.
               </p>
               <p className="text-xs text-slate-500 mt-1 font-mono">
-                {project.name}.py ({lineCount(files.singleFilePy)} lines)
+                {packName.replace(/[^a-zA-Z0-9_-]/g, '_')}/ ({project.nodes.length + 3} files)
               </p>
             </div>
           </button>
@@ -88,14 +89,14 @@ export function ExportModal({ open, onClose }: ExportModalProps): JSX.Element {
             )}
             onClick={() => setMode('package')}
           >
-            <FolderOpen className="h-6 w-6" />
+            <FileCode className="h-6 w-6" />
             <div>
-              <p className="text-sm font-semibold">Full package</p>
+              <p className="text-sm font-semibold">Full package (legacy)</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 Folder with <code className="font-mono">__init__.py</code>, <code className="font-mono">nodes/</code> subfolder, <code className="font-mono">requirements.txt</code>, and <code className="font-mono">README.md</code>.
               </p>
               <p className="text-xs text-slate-500 mt-1 font-mono">
-                {project.name}/ (4 files)
+                {packName.replace(/[^a-zA-Z0-9_-]/g, '_')}/ (4 files)
               </p>
             </div>
           </button>
@@ -104,24 +105,30 @@ export function ExportModal({ open, onClose }: ExportModalProps): JSX.Element {
         {/* Preview of what will be exported */}
         <div className="rounded-lg bg-slate-800/40 border border-slate-700 p-3">
           <p className="text-xs font-semibold text-slate-300 mb-2">Will export:</p>
-          {mode === 'single' ? (
+          {mode === 'individual' ? (
             <ul className="text-xs text-slate-400 space-y-1 font-mono">
-              <li>📄 {project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}.py</li>
+              <li>📁 {packName.replace(/[^a-zA-Z0-9_-]/g, '_')}/</li>
+              <li className="ml-4">📄 __init__.py</li>
+              <li className="ml-4">📁 nodes/</li>
+              {project.nodes.map((n) => (
+                <li key={n.id} className="ml-8">📄 {n.internalName}.py</li>
+              ))}
+              <li className="ml-4">📄 README.md</li>
             </ul>
           ) : (
             <ul className="text-xs text-slate-400 space-y-1 font-mono">
-              <li>📁 {project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}/</li>
+              <li>📁 {packName.replace(/[^a-zA-Z0-9_-]/g, '_')}/</li>
               <li className="ml-4">📄 __init__.py</li>
               <li className="ml-4">📁 nodes/</li>
-              <li className="ml-8">📄 {project.name.replace(/[^a-zA-Z0-9_-]/g, '_')}_nodes.py</li>
+              <li className="ml-8">📄 {packName.replace(/[^a-zA-Z0-9_-]/g, '_')}_nodes.py</li>
               <li className="ml-4">📄 requirements.txt</li>
               <li className="ml-4">📄 README.md</li>
             </ul>
           )}
           <p className="text-xs text-slate-500 mt-2">
-            {mode === 'single'
-              ? 'You will be prompted to choose where to save the file.'
-              : 'You will be prompted to choose a directory. A folder will be created inside it.'}
+            {mode === 'individual'
+              ? 'Point the picker at your ComfyUI/custom_nodes/ folder — the pack folder will be created inside it automatically.'
+              : 'Point the picker at your ComfyUI/custom_nodes/ folder — the pack folder will be created inside it automatically. Uses legacy nodes/ subfolder structure.'}
           </p>
         </div>
 

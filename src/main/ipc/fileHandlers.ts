@@ -44,19 +44,33 @@ export async function handleLoadProject(): Promise<{ project: Project; filePath:
 
 export async function handleExportCode(
   nodes: ComfyNodeDef[],
-  mode: 'single' | 'package',
+  mode: 'individual' | 'package',
   projectName: string
 ): Promise<void> {
   const files = generateAllFiles(nodes, projectName)
 
-  if (mode === 'single') {
-    const result = await dialog.showSaveDialog({
-      title: 'Export Node Code',
-      defaultPath: `${projectName.replace(/[^a-zA-Z0-9_-]/g, '_')}.py`,
-      filters: [{ name: 'Python File', extensions: ['py'] }]
+  if (mode === 'individual') {
+    const result = await dialog.showOpenDialog({
+      title: 'Select Export Directory',
+      properties: ['openDirectory', 'createDirectory']
     })
-    if (result.canceled || !result.filePath) return
-    await fs.writeFile(result.filePath, files.singleFilePy, 'utf-8')
+    if (result.canceled || !result.filePaths[0]) return
+    const sanitized = projectName.replace(/[^a-zA-Z0-9_-]/g, '_')
+    const dir = path.join(result.filePaths[0], sanitized)
+    const nodesDir = path.join(dir, 'nodes')
+    await fs.mkdir(nodesDir, { recursive: true })
+    // Write individual node files into nodes/ subfolder
+    for (const [nodeName, content] of Object.entries(files.nodeFiles)) {
+      await fs.writeFile(path.join(nodesDir, `${nodeName}.py`), content, 'utf-8')
+    }
+    await fs.writeFile(path.join(dir, '__init__.py'), files.initPyIndividual, 'utf-8')
+    // Only write requirements.txt if it has real (non-comment) content
+    const reqContent = files.requirementsTxt.trim()
+    const hasRealRequirements = reqContent.split('\n').some((line) => line.trim() && !line.startsWith('#'))
+    if (hasRealRequirements) {
+      await fs.writeFile(path.join(dir, 'requirements.txt'), files.requirementsTxt, 'utf-8')
+    }
+    await fs.writeFile(path.join(dir, 'README.md'), files.readmeMd, 'utf-8')
   } else {
     const result = await dialog.showOpenDialog({
       title: 'Select Export Directory',
@@ -135,6 +149,29 @@ export async function handleLoadProjectFromPath(
   } catch {
     return null
   }
+}
+
+export async function handleExportToPath(
+  nodes: ComfyNodeDef[],
+  projectName: string,
+  exportPath: string
+): Promise<string> {
+  const files = generateAllFiles(nodes, projectName)
+  const sanitized = projectName.replace(/[^a-zA-Z0-9_-]/g, '_')
+  const packDir = path.join(exportPath, sanitized)
+  const nodesDir = path.join(packDir, 'nodes')
+  await fs.mkdir(nodesDir, { recursive: true })
+  for (const [nodeName, content] of Object.entries(files.nodeFiles)) {
+    await fs.writeFile(path.join(nodesDir, `${nodeName}.py`), content, 'utf-8')
+  }
+  await fs.writeFile(path.join(packDir, '__init__.py'), files.initPyIndividual, 'utf-8')
+  const reqContent = files.requirementsTxt.trim()
+  const hasRealRequirements = reqContent.split('\n').some((line) => line.trim() && !line.startsWith('#'))
+  if (hasRealRequirements) {
+    await fs.writeFile(path.join(packDir, 'requirements.txt'), files.requirementsTxt, 'utf-8')
+  }
+  await fs.writeFile(path.join(packDir, 'README.md'), files.readmeMd, 'utf-8')
+  return packDir
 }
 
 export { handleImportNodeFolder, handleImportNodeFile } from '../generators/nodeImporter'

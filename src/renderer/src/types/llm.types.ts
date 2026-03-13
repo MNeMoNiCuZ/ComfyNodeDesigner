@@ -34,6 +34,9 @@ export interface ChatMessage {
   elapsedMs?: number
   mode?: 'execute' | 'fullnode'
   nodeId?: string
+  responseStatus?: 'ok' | 'parse_failed' | 'all_invalid'
+  provider?: LLMProvider
+  model?: string
 }
 
 export interface LLMChatRequest {
@@ -53,7 +56,17 @@ export const DEFAULT_MODELS: Record<LLMProvider, string[]> = {
     'claude-haiku-4-5-20251001'
   ],
   google: ['gemini-3.1-pro', 'gemini-3.1-flash-lite', 'gemini-2.5-flash', 'gemini-2.0-flash'],
-  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768'],
+  groq: [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant',
+    'groq/compound',
+    'groq/compound-mini',
+    'moonshotai/kimi-k2-instruct-0905',
+    'qwen/qwen3-32b',
+    'meta-llama/llama-4-scout-17b-16e-instruct'
+  ],
   xai: ['grok-3', 'grok-3-mini', 'grok-2'],
   openrouter: ['openai/gpt-5.4', 'anthropic/claude-sonnet-4-6', 'google/gemini-3.1-pro', 'meta-llama/llama-3.3-70b-instruct'],
   ollama: []  // Populated dynamically from local Ollama instance
@@ -75,7 +88,7 @@ export const DEFAULT_LLM_SETTINGS: LLMSettings = {
     openai: { provider: 'openai', model: 'gpt-5.4' },
     anthropic: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
     google: { provider: 'google', model: 'gemini-3.1-pro' },
-    groq: { provider: 'groq', model: 'llama-3.3-70b-versatile' },
+    groq: { provider: 'groq', model: 'openai/gpt-oss-120b' },
     xai: { provider: 'xai', model: 'grok-3', baseUrl: 'https://api.x.ai/v1' },
     openrouter: {
       provider: 'openrouter',

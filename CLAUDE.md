@@ -2,20 +2,9 @@
 
 ## Branch & PR workflow
 
-- **Always develop on branch:** `claude/comfyui-node-generator-1FLyt`
-- **After every push**, immediately attempt to open a pull request targeting `main`
-- Use `gh pr create` if the `gh` CLI is available
-- If `gh` is not installed, try the GitHub API:
-  ```bash
-  curl -s -X POST "https://api.github.com/repos/MNeMoNiCuZ/ComfyNodeDesigner/pulls" \
-    -H "Authorization: token $GITHUB_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d "{\"title\":\"...\",\"head\":\"claude/comfyui-node-generator-1FLyt\",\"base\":\"main\",\"body\":\"...\"}"
-  ```
-- If `GITHUB_TOKEN` is not set, **tell the user explicitly** that a PR could not be
-  created automatically, show them the direct GitHub URL to do it themselves:
-  `https://github.com/MNeMoNiCuZ/ComfyNodeDesigner/compare/claude/comfyui-node-generator-1FLyt`
-- **Never silently skip PR creation.** Always attempt it and report the result.
+- **Do NOT create pull requests or attempt GitHub PR submission unless the user explicitly asks.**
+- **Do NOT mention GitHub PR URLs unless asked.**
+- Work directly on the current branch.
 
 ## Tech stack
 

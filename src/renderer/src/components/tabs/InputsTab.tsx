@@ -4,11 +4,13 @@ import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
 import { Button } from '../ui/button'
 import { TypeBadge } from '../shared/CodeBadge'
-import { Plus, Trash2, Edit2, GripVertical, ChevronDown, ChevronUp, X } from 'lucide-react'
+import { Plus, Trash2, SquarePen, GripVertical, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { InputEditModal } from '../modals/InputEditModal'
 import { Switch } from '../ui/switch'
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip'
+
+const WIDGET_TYPES = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
 
 interface InputsTabProps {
   node: ComfyNodeDef
@@ -16,37 +18,34 @@ interface InputsTabProps {
 
 export function InputsTab({ node }: InputsTabProps): JSX.Element {
   const { updateNode } = useProjectStore()
-  const { pendingProposal, setPendingProposal } = useSettingsStore()
+  const { pendingProposal } = useSettingsStore()
   const [editingInput, setEditingInput] = useState<NodeInput | null>(null)
   const [addingNew, setAddingNew] = useState(false)
   const [dragging, setDragging] = useState<number | null>(null)
-  const [dragOver, setDragOver] = useState<number | null>(null)
+  const [dragOverIdx, setDragOverIdx] = useState<number | null>(null)
+  const [dragOverHalf, setDragOverHalf] = useState<'top' | 'bottom' | null>(null)
+  const [viewingProposed, setViewingProposed] = useState<NodeInput | null>(null)
 
   const activeProposal = pendingProposal?.nodeId === node.id ? pendingProposal : null
 
   // Build lookup maps from proposal operations
-  const proposalAddedInputs: Array<{ name: string; type: string; required?: boolean }> = []
-  const proposalUpdatedInputNames = new Set<string>()
+  const proposalAddedInputs: Array<any> = []
+  const proposalUpdatedInputs = new Map<string, any>()
   const proposalDeletedInputNames = new Set<string>()
 
   if (activeProposal) {
     for (const op of activeProposal.operations) {
-      if (op.op === 'add_input') {
-        proposalAddedInputs.push({ name: op.name, type: op.type ?? 'IMAGE', required: op.required !== false })
-      } else if (op.op === 'update_input') {
-        proposalUpdatedInputNames.add(op.name)
-      } else if (op.op === 'delete_input') {
-        proposalDeletedInputNames.add(op.name)
-      }
+      if (op._invalid) continue
+      if (op.op === 'add_input') proposalAddedInputs.push(op)
+      else if (op.op === 'update_input') proposalUpdatedInputs.set(op.name, op)
+      else if (op.op === 'delete_input') proposalDeletedInputNames.add(op.name)
     }
   }
 
   function handleSaveInput(input: NodeInput): void {
     const exists = node.inputs.find((i) => i.id === input.id)
     if (exists) {
-      updateNode(node.id, {
-        inputs: node.inputs.map((i) => (i.id === input.id ? input : i))
-      })
+      updateNode(node.id, { inputs: node.inputs.map((i) => (i.id === input.id ? input : i)) })
     } else {
       updateNode(node.id, { inputs: [...node.inputs, input] })
     }
@@ -74,15 +73,23 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
     updateNode(node.id, { inputs })
   }
 
+  function resetDrag(): void {
+    setDragging(null)
+    setDragOverIdx(null)
+    setDragOverHalf(null)
+  }
+
   function handleDrop(toIdx: number): void {
     if (dragging !== null && dragging !== toIdx) {
+      const half = dragOverHalf ?? 'bottom'
       const inputs = [...node.inputs]
       const [moved] = inputs.splice(dragging, 1)
-      inputs.splice(toIdx, 0, moved)
+      let insertAt = half === 'top' ? toIdx : toIdx + 1
+      if (dragging < toIdx) insertAt--
+      inputs.splice(insertAt, 0, moved)
       updateNode(node.id, { inputs })
     }
-    setDragging(null)
-    setDragOver(null)
+    resetDrag()
   }
 
   return (
@@ -103,20 +110,13 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
 
       {/* Pending proposal banner */}
       {activeProposal && (
-        <div className="flex items-center gap-2 px-4 py-2 bg-blue-900/20 border-b border-blue-700/40 text-xs text-blue-300">
-          <span className="flex-1">AI proposal preview active — click &apos;Apply&apos; in the AI Assistant tab to apply changes, or &apos;Clear Preview&apos; to dismiss.</span>
-          <button
-            onClick={() => setPendingProposal(null)}
-            className="shrink-0 rounded p-0.5 hover:bg-blue-800/40"
-            title="Dismiss preview"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+        <div className="flex items-center gap-2 px-4 py-2 bg-amber-900/20 border-b border-amber-700/40 text-xs text-amber-300">
+          <span className="flex-1">AI proposal preview active — use the Accept/Reject bar above to apply or discard changes.</span>
         </div>
       )}
 
       {/* Input list */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-2">
+      <div className="flex-1 overflow-y-auto p-4 space-y-1">
         {node.inputs.length === 0 && proposalAddedInputs.length === 0 && (
           <div className="flex flex-col items-center justify-center py-12 gap-3 text-center">
             <p className="text-sm text-slate-500">No inputs defined.</p>
@@ -128,141 +128,283 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
         )}
 
         {node.inputs.map((input, idx) => {
-          const isUpdated = proposalUpdatedInputNames.has(input.name)
           const isDeleted = proposalDeletedInputNames.has(input.name)
+          const updateOp = proposalUpdatedInputs.get(input.name)
+          const isUpdated = updateOp != null
+          const displayInput = isUpdated
+            ? {
+                ...input,
+                ...(updateOp.updates ?? updateOp),
+                type: ((updateOp.updates ?? updateOp).type
+                  ? String((updateOp.updates ?? updateOp).type).toUpperCase()
+                  : input.type) as any
+              }
+            : input
+          const showTopLine = dragOverIdx === idx && dragOverHalf === 'top' && dragging !== idx
+          const showBottomLine = dragOverIdx === idx && dragOverHalf === 'bottom' && dragging !== idx
+
           return (
             <div
               key={input.id}
-              draggable
-              onDragStart={() => setDragging(idx)}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(idx) }}
-              onDrop={() => handleDrop(idx)}
-              onDragEnd={() => { setDragging(null); setDragOver(null) }}
-              className={cn(
-                'group flex items-center gap-3 rounded-lg border border-slate-700/60 bg-slate-800/40 px-3 py-2.5 transition-colors',
-                dragOver === idx && dragging !== idx && 'border-blue-500',
-                dragging === idx && 'opacity-50',
-                isUpdated && 'border-l-2 border-l-yellow-500/70',
-                isDeleted && 'border-l-2 border-l-red-500/70 opacity-60'
-              )}
+              className="relative"
             >
-              {/* Drag handle */}
-              <GripVertical className="drag-handle h-4 w-4 shrink-0 text-slate-600 group-hover:text-slate-500 cursor-grab" />
-
-              {/* Proposal indicator */}
-              {isUpdated && (
-                <span className="shrink-0 text-[10px] font-bold text-yellow-400 bg-yellow-900/30 rounded px-1">~</span>
+              {/* Drop indicator: before */}
+              {showTopLine && (
+                <div className="absolute -top-0.5 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
               )}
-              {isDeleted && (
-                <span className="shrink-0 text-[10px] font-bold text-red-400 bg-red-900/30 rounded px-1">-</span>
-              )}
+              <div
+                draggable
+                onDragStart={() => setDragging(idx)}
+                onDragOver={(e) => {
+                  e.preventDefault()
+                  const rect = e.currentTarget.getBoundingClientRect()
+                  setDragOverIdx(idx)
+                  setDragOverHalf((e.clientY - rect.top) < rect.height / 2 ? 'top' : 'bottom')
+                }}
+                onDrop={() => handleDrop(idx)}
+                onDragEnd={resetDrag}
+                onDragLeave={() => { if (dragOverIdx === idx) { setDragOverIdx(null); setDragOverHalf(null) } }}
+                onDoubleClick={() => setEditingInput(input)}
+                className={cn(
+                  'group flex items-center gap-2 rounded-lg border bg-slate-800/40 px-2 py-2 transition-colors select-none cursor-pointer',
+                  dragging === idx && 'opacity-40',
+                  !isUpdated && !isDeleted && (dragOverIdx === idx ? 'border-transparent' : 'border-slate-700/60'),
+                  isUpdated && 'border-l-4 border-l-yellow-500 border-slate-700/60',
+                  isDeleted && 'border-l-4 border-l-red-500 border-slate-700/60 opacity-60'
+                )}
+              >
+                {/* LEFT: up/down + edit */}
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="flex flex-col gap-0">
+                    <button
+                      className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-20 transition-colors"
+                      onClick={(e) => { e.stopPropagation(); handleMove(input.id, 'up') }}
+                      disabled={idx === 0}
+                      title="Move up"
+                    >
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                    <button
+                      className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-20 transition-colors"
+                      onClick={(e) => { e.stopPropagation(); handleMove(input.id, 'down') }}
+                      disabled={idx === node.inputs.length - 1}
+                      title="Move down"
+                    >
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
+                  </div>
+                  <button
+                    className="rounded p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-700 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); setEditingInput(input) }}
+                    title="Edit input (or double-click row)"
+                  >
+                    <SquarePen className="h-3.5 w-3.5" />
+                  </button>
+                </div>
 
-              {/* Type badge */}
-              <TypeBadge type={input.type} />
+                {/* Drag handle */}
+                <GripVertical className="drag-handle h-4 w-4 shrink-0 text-slate-700 group-hover:text-slate-500 cursor-grab" />
 
-              {/* Name + tooltip */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className={cn("text-sm font-medium text-slate-200 font-mono", isDeleted && 'line-through')}>{input.name}</span>
-                  {input.forceInput && (
-                    <span className="text-xs text-slate-500 bg-slate-700 rounded px-1">force_input</span>
+                {/* Index */}
+                <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center">{idx}</span>
+
+                {/* Proposal badges */}
+                {isUpdated && (
+                  <span className="shrink-0 text-[10px] font-bold text-yellow-300 bg-yellow-900/40 border border-yellow-700/50 rounded px-1.5 py-0.5">WILL CHANGE</span>
+                )}
+                {isDeleted && (
+                  <span className="shrink-0 text-[10px] font-bold text-red-300 bg-red-900/40 border border-red-700/50 rounded px-1.5 py-0.5">WILL DELETE</span>
+                )}
+
+                {/* Req/opt toggle */}
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                      <span className="text-[10px] text-muted-foreground w-5">{input.required ? 'req' : 'opt'}</span>
+                      <Switch
+                        checked={input.required}
+                        onCheckedChange={(checked) => handleToggleRequired(input.id, checked)}
+                      />
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    {input.required ? 'Required — must be connected' : 'Optional — has a default or can be left disconnected'}
+                  </TooltipContent>
+                </Tooltip>
+
+                {/* Type badge — fixed width so names align */}
+                <div className="w-[5.5rem] shrink-0 flex justify-center">
+                  <TypeBadge type={displayInput.type} />
+                </div>
+
+                {/* Name + info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      'text-sm font-medium font-mono',
+                      isDeleted ? 'line-through text-slate-500' : 'text-slate-200'
+                    )}>
+                      {input.name}
+                    </span>
+                    {input.forceInput && (
+                      <span className="text-xs text-slate-500 bg-slate-700 rounded px-1">force_input</span>
+                    )}
+                  </div>
+                  {isUpdated && displayInput.type !== input.type && (
+                    <p className="text-[10px] text-slate-500 mt-0.5">
+                      was: <span className="font-mono">{input.type}</span>
+                      <span className="mx-1">→</span>
+                      <span className="font-mono text-yellow-400">{displayInput.type}</span>
+                    </p>
+                  )}
+                  {input.tooltip && !isUpdated && (
+                    <p className="text-xs text-slate-500 truncate mt-0.5">{input.tooltip}</p>
+                  )}
+                  {input.widget && input.type !== 'COMBO' && !isUpdated && (
+                    <p className="text-xs text-slate-600 font-mono mt-0.5">
+                      {[
+                        input.widget.default !== undefined && `default=${input.widget.default}`,
+                        input.widget.min !== undefined && `min=${input.widget.min}`,
+                        input.widget.max !== undefined && `max=${input.widget.max}`,
+                        input.widget.step !== undefined && `step=${input.widget.step}`,
+                        input.widget.multiline && 'multiline',
+                      ].filter(Boolean).join(', ')}
+                    </p>
+                  )}
+                  {input.widget?.comboOptions && !isUpdated && (
+                    <p className="text-xs text-slate-600 font-mono mt-0.5">
+                      [{input.widget.comboOptions.slice(0, 3).map(o => `"${o}"`).join(', ')}{input.widget.comboOptions.length > 3 ? `… +${input.widget.comboOptions.length - 3}` : ''}]
+                    </p>
                   )}
                 </div>
-                {input.tooltip && (
-                  <p className="text-xs text-slate-500 truncate mt-0.5">{input.tooltip}</p>
-                )}
-                {input.widget && input.type !== 'COMBO' && (
-                  <p className="text-xs text-slate-600 font-mono mt-0.5">
-                    {[
-                      input.widget.default !== undefined && `default=${input.widget.default}`,
-                      input.widget.min !== undefined && `min=${input.widget.min}`,
-                      input.widget.max !== undefined && `max=${input.widget.max}`,
-                      input.widget.step !== undefined && `step=${input.widget.step}`,
-                      input.widget.multiline && 'multiline',
-                    ]
-                      .filter(Boolean)
-                      .join(', ')}
-                  </p>
-                )}
-                {input.widget?.comboOptions && (
-                  <p className="text-xs text-slate-600 font-mono mt-0.5">
-                    [{input.widget.comboOptions.slice(0, 3).map(o => `"${o}"`).join(', ')}{input.widget.comboOptions.length > 3 ? `… +${input.widget.comboOptions.length - 3}` : ''}]
-                  </p>
-                )}
-              </div>
 
-              {/* Required toggle */}
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-muted-foreground">{input.required ? 'req' : 'opt'}</span>
-                    <Switch
-                      checked={input.required}
-                      onCheckedChange={(checked) => handleToggleRequired(input.id, checked)}
-                    />
+                {/* RIGHT: trash */}
+                <button
+                  className="shrink-0 rounded p-1.5 text-slate-600 hover:text-red-400 hover:bg-slate-700 transition-colors"
+                  onClick={(e) => { e.stopPropagation(); handleDelete(input.id) }}
+                  title="Delete input"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              {/* Drop indicator: after */}
+              {showBottomLine && (
+                <div className="absolute -bottom-0.5 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
+              )}
+            </div>
+          )
+        })}
+
+        {/* Ghost rows for proposed additions */}
+        {proposalAddedInputs.map((op, i) => {
+          const opType = String(op.type ?? 'IMAGE').toUpperCase()
+          const isForceInput = op.forceInput ?? !WIDGET_TYPES.has(opType)
+          const opRequired = op.required !== false
+          return (
+            <div key={`proposed-${i}`} className="relative">
+              <div
+                className="group flex items-center gap-2 rounded-lg border-l-4 border-l-green-500 border border-green-800/30 bg-green-900/10 px-2 py-2 select-none cursor-pointer"
+                onDoubleClick={() => {
+                  const proposedInput: NodeInput = {
+                    id: 'proposed-preview',
+                    name: op.name,
+                    type: opType as any,
+                    required: opRequired,
+                    forceInput: isForceInput,
+                    tooltip: op.tooltip ?? '',
+                    widget: op.widget
+                  }
+                  setViewingProposed(proposedInput)
+                }}
+              >
+                {/* LEFT: disabled arrows + edit */}
+                <div className="flex items-center gap-0.5 shrink-0">
+                  <div className="flex flex-col gap-0 opacity-20">
+                    <button className="rounded p-0.5 text-slate-600 cursor-not-allowed" disabled>
+                      <ChevronUp className="h-3 w-3" />
+                    </button>
+                    <button className="rounded p-0.5 text-slate-600 cursor-not-allowed" disabled>
+                      <ChevronDown className="h-3 w-3" />
+                    </button>
                   </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {input.required
-                    ? 'Required — must be connected'
-                    : 'Optional — has a default or can be left disconnected'}
-                </TooltipContent>
-              </Tooltip>
+                  <button
+                    className="rounded p-1.5 text-green-500 hover:text-green-300 hover:bg-slate-700 transition-colors"
+                    title="View proposed input (read-only)"
+                    onClick={() => {
+                      const proposedInput: NodeInput = {
+                        id: 'proposed-preview',
+                        name: op.name,
+                        type: opType as any,
+                        required: opRequired,
+                        forceInput: isForceInput,
+                        tooltip: op.tooltip ?? '',
+                        widget: op.widget
+                      }
+                      setViewingProposed(proposedInput)
+                    }}
+                  >
+                    <SquarePen className="h-3.5 w-3.5" />
+                  </button>
+                </div>
 
-              {/* Order controls */}
-              <div className="flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                <button
-                  className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-30"
-                  onClick={() => handleMove(input.id, 'up')}
-                  disabled={idx === 0}
-                >
-                  <ChevronUp className="h-3 w-3" />
-                </button>
-                <button
-                  className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-30"
-                  onClick={() => handleMove(input.id, 'down')}
-                  disabled={idx === node.inputs.length - 1}
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </button>
-              </div>
+                {/* No drag handle for ghost rows */}
+                <div className="w-4 shrink-0" />
 
-              {/* Edit / Delete */}
-              <div className="flex items-center gap-1">
-                <button
-                  className="rounded p-1 text-slate-500 hover:text-slate-200 hover:bg-slate-700"
-                  onClick={() => setEditingInput(input)}
-                >
-                  <Edit2 className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  className="rounded p-1 text-slate-500 hover:text-red-400 hover:bg-slate-700"
-                  onClick={() => handleDelete(input.id)}
-                >
+                {/* Index placeholder */}
+                <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center opacity-30">—</span>
+
+                {/* NEW badge */}
+                <span className="shrink-0 text-[10px] font-bold text-green-300 bg-green-900/40 border border-green-700/50 rounded px-1.5 py-0.5">NEW</span>
+
+                {/* Req display (non-interactive) */}
+                <div className="flex items-center gap-1 shrink-0 opacity-60">
+                  <span className="text-[10px] text-muted-foreground w-5">{opRequired ? 'req' : 'opt'}</span>
+                  <Switch checked={opRequired} onCheckedChange={() => {}} disabled />
+                </div>
+
+                {/* Type badge — fixed width so names align */}
+                <div className="w-[5.5rem] shrink-0 flex justify-center">
+                  <span className="text-xs font-mono text-slate-300 bg-slate-700/50 rounded px-1.5 py-0.5 uppercase">{opType}</span>
+                </div>
+
+                {/* Name + info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-green-300 font-mono">{op.name}</span>
+                    {isForceInput && (
+                      <span className="text-xs text-slate-500 bg-slate-700 rounded px-1">force_input</span>
+                    )}
+                    <span className="text-[10px] text-green-700 italic">(proposed)</span>
+                  </div>
+                  {op.tooltip && (
+                    <p className="text-xs text-slate-500 truncate mt-0.5">{op.tooltip}</p>
+                  )}
+                  {op.widget && opType !== 'COMBO' && (
+                    <p className="text-xs text-slate-600 font-mono mt-0.5">
+                      {[
+                        op.widget.default !== undefined && `default=${op.widget.default}`,
+                        op.widget.min !== undefined && `min=${op.widget.min}`,
+                        op.widget.max !== undefined && `max=${op.widget.max}`,
+                        op.widget.step !== undefined && `step=${op.widget.step}`,
+                        op.widget.multiline && 'multiline',
+                      ].filter(Boolean).join(', ')}
+                    </p>
+                  )}
+                  {op.widget?.comboOptions && (
+                    <p className="text-xs text-slate-600 font-mono mt-0.5">
+                      [{op.widget.comboOptions.slice(0, 3).map((o: string) => `"${o}"`).join(', ')}{op.widget.comboOptions.length > 3 ? `… +${op.widget.comboOptions.length - 3}` : ''}]
+                    </p>
+                  )}
+                </div>
+
+                {/* RIGHT: disabled trash */}
+                <button className="shrink-0 rounded p-1.5 text-slate-700 cursor-not-allowed opacity-30" disabled title="Cannot delete a proposed input">
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
               </div>
             </div>
           )
         })}
-
-        {/* Ghost rows for proposed additions */}
-        {proposalAddedInputs.map((proposed, i) => (
-          <div
-            key={`proposed-${i}`}
-            className="flex items-center gap-3 rounded-lg border-l-2 border-l-green-500/70 border border-green-800/30 bg-green-900/10 px-3 py-2.5"
-          >
-            <span className="shrink-0 text-[10px] font-bold text-green-400 bg-green-900/30 rounded px-1">+</span>
-            <span className="text-xs font-mono text-slate-500 bg-slate-700/50 rounded px-1.5 py-0.5 uppercase">{proposed.type}</span>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-green-300/80 font-mono">{proposed.name}</span>
-                <span className="text-[10px] text-green-600 italic">(proposed)</span>
-              </div>
-            </div>
-            <span className="text-xs text-slate-500">{proposed.required !== false ? 'req' : 'opt'}</span>
-          </div>
-        ))}
       </div>
 
       {/* Modals */}
@@ -272,6 +414,15 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
           input={editingInput ?? undefined}
           onSave={handleSaveInput}
           onClose={() => { setEditingInput(null); setAddingNew(false) }}
+        />
+      )}
+      {viewingProposed && (
+        <InputEditModal
+          open={true}
+          input={viewingProposed}
+          onSave={() => {}}
+          onClose={() => setViewingProposed(null)}
+          readOnly
         />
       )}
     </div>
