@@ -21,6 +21,7 @@ export type ComfyType =
   | 'FLOAT'
   | 'STRING'
   | 'BOOLEAN'
+  | 'SEED'
   | 'COMBO'
   | '*'
 
@@ -67,11 +68,13 @@ export interface ComfyNodeDef {
   validateInputs: boolean
   isChangedMode: IsChangedMode
   executeBody: string
+  usePackFolder: boolean
 }
 
 export interface Project {
   version: '1.0'
   name: string
+  packName: string
   nodes: ComfyNodeDef[]
   createdAt: string
   updatedAt: string
@@ -92,6 +95,7 @@ export function createDefaultNode(overrides?: Partial<ComfyNodeDef>): ComfyNodeD
     validateInputs: false,
     isChangedMode: 'none',
     executeBody: '        pass',
+    usePackFolder: true,
     ...overrides
   }
 }

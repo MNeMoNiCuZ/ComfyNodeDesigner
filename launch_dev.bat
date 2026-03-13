@@ -1,0 +1,3 @@
+@echo off
+echo Starting ComfyNode Designer in development mode...
+npm run dev

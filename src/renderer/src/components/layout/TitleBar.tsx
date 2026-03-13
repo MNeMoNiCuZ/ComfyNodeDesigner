@@ -10,11 +10,10 @@ import {
   Box,
   Pencil,
   ChevronDown,
-  Upload,
-  FileCode,
-  FolderArchive
+  Upload
 } from 'lucide-react'
-import { ExportModal } from '../modals/ExportModal'
+import { ImportModal } from '../modals/ImportModal'
+import { ExportToast } from '../shared/ExportToast'
 import { cn } from '../../lib/utils'
 import { createDefaultNode } from '../../types/node.types'
 import type { ComfyNodeDef } from '../../types/node.types'
@@ -22,17 +21,18 @@ import type { ComfyNodeDef } from '../../types/node.types'
 export function TitleBar(): JSX.Element {
   const { project, isDirty, newProject, openProject, currentFilePath, setProjectName, importNodes } =
     useProjectStore()
-  const { addRecentProject, recentProjects, recentProjectsEnabled } =
+  const { addRecentProject, recentProjects, recentProjectsEnabled, exportPath } =
     useSettingsStore()
-  const [exportOpen, setExportOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [exporting, setExporting] = useState(false)
+  const [exportDone, setExportDone] = useState(false)
+  const [exportedPath, setExportedPath] = useState<string | null>(null)
   const [editingName, setEditingName] = useState(false)
   const [nameValue, setNameValue] = useState(project.name)
   const [recentOpen, setRecentOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const recentDropdownRef = useRef<HTMLDivElement>(null)
-  const importDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setNameValue(project.name) }, [project.name])
   useEffect(() => { if (editingName) nameInputRef.current?.select() }, [editingName])
@@ -49,18 +49,6 @@ export function TitleBar(): JSX.Element {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [recentOpen])
 
-  // Close import dropdown when clicking outside
-  useEffect(() => {
-    if (!importOpen) return
-    function handleClickOutside(e: MouseEvent): void {
-      if (importDropdownRef.current && !importDropdownRef.current.contains(e.target as Node)) {
-        setImportOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [importOpen])
-
   function commitName(): void {
     const trimmed = nameValue.trim()
     if (trimmed && trimmed !== project.name) setProjectName(trimmed)
@@ -70,7 +58,7 @@ export function TitleBar(): JSX.Element {
 
   async function handleNew(): Promise<void> {
     if (isDirty) {
-      const confirmed = window.confirm('You have unsaved changes. Create a new project anyway?')
+      const confirmed = await window.electronAPI.showConfirmDialog('You have unsaved changes.', 'Create a new project anyway?')
       if (!confirmed) return
     }
     newProject()
@@ -78,7 +66,7 @@ export function TitleBar(): JSX.Element {
 
   async function handleOpen(): Promise<void> {
     if (isDirty) {
-      const confirmed = window.confirm('You have unsaved changes. Open another project anyway?')
+      const confirmed = await window.electronAPI.showConfirmDialog('You have unsaved changes.', 'Open another project anyway?')
       if (!confirmed) return
     }
     const result = await window.electronAPI.loadProject()
@@ -91,7 +79,7 @@ export function TitleBar(): JSX.Element {
   async function handleOpenRecent(recentPath: string): Promise<void> {
     setRecentOpen(false)
     if (isDirty) {
-      const confirmed = window.confirm('You have unsaved changes. Open another project anyway?')
+      const confirmed = await window.electronAPI.showConfirmDialog('You have unsaved changes.', 'Open another project anyway?')
       if (!confirmed) return
     }
     try {
@@ -165,8 +153,22 @@ export function TitleBar(): JSX.Element {
     alert(`Imported ${converted.length} node${converted.length !== 1 ? 's' : ''}.`)
   }
 
+  async function handleDirectExport(): Promise<void> {
+    if (!exportPath || project.nodes.length === 0) return
+    setExporting(true)
+    try {
+      const resultPath = await window.electronAPI.exportToPath(project.nodes, project.packName ?? project.name, exportPath)
+      setExportedPath(resultPath)
+      setExportDone(true)
+      setTimeout(() => setExportDone(false), 2500)
+    } catch (e) {
+      alert(`Export failed: ${(e as Error).message ?? String(e)}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   async function handleImportFolder(): Promise<void> {
-    setImportOpen(false)
     try {
       const rawNodes = await window.electronAPI.importNodeFolder()
       await doImport(rawNodes)
@@ -176,7 +178,6 @@ export function TitleBar(): JSX.Element {
   }
 
   async function handleImportFile(): Promise<void> {
-    setImportOpen(false)
     try {
       const rawNodes = await window.electronAPI.importNodeFile()
       await doImport(rawNodes)
@@ -279,54 +280,37 @@ export function TitleBar(): JSX.Element {
             {saving ? 'Saving…' : isDirty ? 'Save*' : 'Save'}
           </Button>
 
-          {/* Import dropdown */}
-          <div className="relative" ref={importDropdownRef}>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1.5 text-xs text-slate-300 hover:text-white px-2"
-              onClick={() => setImportOpen((v) => !v)}
-              title="Import nodes from Python"
-            >
-              <Upload className="h-3.5 w-3.5" />
-              Import
-              <ChevronDown className="h-3 w-3" />
-            </Button>
-            {importOpen && (
-              <div className="absolute top-full left-0 mt-1 z-50 min-w-44 bg-slate-800 border border-slate-600 rounded-md shadow-xl overflow-hidden">
-                <ul className="py-1">
-                  <li>
-                    <button
-                      className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-200 hover:bg-slate-700 transition-colors"
-                      onClick={handleImportFolder}
-                    >
-                      <FolderArchive className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                      From Folder
-                    </button>
-                  </li>
-                  <li>
-                    <button
-                      className="w-full text-left flex items-center gap-2 px-3 py-2 text-xs text-slate-200 hover:bg-slate-700 transition-colors"
-                      onClick={handleImportFile}
-                    >
-                      <FileCode className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                      From .py File
-                    </button>
-                  </li>
-                </ul>
-              </div>
-            )}
-          </div>
-
+          {/* Import button — opens modal */}
           <Button
             variant="ghost"
             size="sm"
             className="h-7 gap-1.5 text-xs text-slate-300 hover:text-white px-2"
-            onClick={() => setExportOpen(true)}
-            title="Export code"
+            onClick={() => setImportOpen(true)}
+            title="Import nodes from Python"
+          >
+            <Upload className="h-3.5 w-3.5" />
+            Import
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              'h-7 gap-1.5 text-xs px-2',
+              exportDone ? 'text-green-400 hover:text-green-300' : 'text-slate-300 hover:text-white'
+            )}
+            onClick={handleDirectExport}
+            disabled={exporting || !exportPath || project.nodes.length === 0}
+            title={
+              !exportPath
+                ? 'Set an export path in the Pack tab first'
+                : project.nodes.length === 0
+                ? 'Add at least one node to export'
+                : `Export to ${exportPath}`
+            }
           >
             <Download className="h-3.5 w-3.5" />
-            Export
+            {exportDone ? 'Exported!' : exporting ? 'Exporting…' : 'Export'}
           </Button>
         </div>
 
@@ -357,7 +341,13 @@ export function TitleBar(): JSX.Element {
         </div>
       </div>
 
-      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} />
+      <ImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onImportFile={handleImportFile}
+        onImportFolder={handleImportFolder}
+      />
+      <ExportToast exportedPath={exportedPath} onDismiss={() => setExportedPath(null)} />
     </>
   )
 }

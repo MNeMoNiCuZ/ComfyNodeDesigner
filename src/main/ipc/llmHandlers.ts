@@ -319,3 +319,12 @@ export async function handleFetchOllamaModels(baseUrl: string): Promise<string[]
   const data = (await response.json()) as { models?: Array<{ name: string }> }
   return (data.models ?? []).map((m) => m.name)
 }
+
+export async function handleFetchGroqModels(apiKey: string): Promise<string[]> {
+  const response = await fetch('https://api.groq.com/openai/v1/models', {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  })
+  if (!response.ok) throw new Error(`Groq API error: ${response.status}`)
+  const data = (await response.json()) as { data?: Array<{ id: string }> }
+  return (data.data ?? []).map((m) => m.id).sort()
+}

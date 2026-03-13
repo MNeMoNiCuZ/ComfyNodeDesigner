@@ -122,27 +122,54 @@ export function AdvancedTab({ node }: AdvancedTabProps): JSX.Element {
         </div>
       </div>
 
-      {/* Generated code notes */}
-      <div className="mt-6 rounded-lg bg-slate-800/40 border border-slate-700/50 p-4 space-y-2">
-        <p className="text-xs font-semibold text-slate-300">Generated code notes:</p>
-        {node.isOutputNode && (
-          <p className="text-xs text-slate-400">• <code className="font-mono">OUTPUT_NODE = True</code> will be added to the class.</p>
-        )}
-        {node.isInputNode && (
-          <p className="text-xs text-slate-400">• <code className="font-mono">INPUT_NODE = True</code> will be added to the class.</p>
-        )}
-        {node.validateInputs && (
-          <p className="text-xs text-slate-400">• A <code className="font-mono">VALIDATE_INPUTS</code> stub will be generated — fill in the validation logic.</p>
-        )}
-        {node.isChangedMode === 'always' && (
-          <p className="text-xs text-slate-400">• <code className="font-mono">IS_CHANGED</code> will use <code className="font-mono">time.time()</code> to force re-execution every run.</p>
-        )}
-        {node.isChangedMode === 'hash' && (
-          <p className="text-xs text-slate-400">• <code className="font-mono">IS_CHANGED</code> will hash all inputs with MD5 to detect changes.</p>
-        )}
-        {!node.isOutputNode && !node.isInputNode && !node.validateInputs && node.isChangedMode === 'none' && (
-          <p className="text-xs text-slate-500">No advanced options enabled — the class will use ComfyUI defaults.</p>
-        )}
+      {/* Code impact summary */}
+      <div className="mt-6 rounded-lg border border-slate-700/50 overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 bg-slate-800/60 border-b border-slate-700/50">
+          <span className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Code Impact</span>
+          <span className="text-[10px] text-slate-600">— how enabled options affect the generated Python class</span>
+        </div>
+        <div className="bg-slate-900/50 px-3 py-2.5 font-mono text-xs space-y-1">
+          {node.isOutputNode && (
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+              <code className="text-blue-300">OUTPUT_NODE = True</code>
+              <span className="text-slate-600 font-sans">added to class body</span>
+            </div>
+          )}
+          {node.isInputNode && (
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 shrink-0" />
+              <code className="text-purple-300">INPUT_NODE = True</code>
+              <span className="text-slate-600 font-sans">added to class body</span>
+            </div>
+          )}
+          {node.validateInputs && (
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
+              <code className="text-cyan-300">@classmethod validate_inputs()</code>
+              <span className="text-slate-600 font-sans">stub generated</span>
+            </div>
+          )}
+          {node.isChangedMode === 'always' && (
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+              <code className="text-amber-300">IS_CHANGED</code>
+              <code className="text-slate-500">→ time.time()</code>
+              <span className="text-slate-600 font-sans">re-runs every time</span>
+            </div>
+          )}
+          {node.isChangedMode === 'hash' && (
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+              <code className="text-amber-300">IS_CHANGED</code>
+              <code className="text-slate-500">→ md5(inputs)</code>
+              <span className="text-slate-600 font-sans">re-runs on change</span>
+            </div>
+          )}
+          {!node.isOutputNode && !node.isInputNode && !node.validateInputs && node.isChangedMode === 'none' && (
+            <span className="text-slate-600 font-sans italic">No advanced options enabled — class uses ComfyUI defaults.</span>
+          )}
+        </div>
       </div>
     </div>
   )

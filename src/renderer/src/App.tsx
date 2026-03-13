@@ -41,7 +41,6 @@ class ErrorBoundary extends React.Component<
 }
 
 export default function App(): JSX.Element {
-  const { isDirty } = useProjectStore()
   const { loadFromMain } = useSettingsStore()
 
   // Load settings on startup
@@ -70,19 +69,30 @@ export default function App(): JSX.Element {
           .catch(() => {/* cancelled */})
       } else if (mod && e.key === 'n' && !e.shiftKey) {
         e.preventDefault()
-        if (useProjectStore.getState().isDirty && !window.confirm('Unsaved changes. Create new project?')) return
-        useProjectStore.getState().newProject()
+        if (useProjectStore.getState().isDirty) {
+          window.electronAPI.showConfirmDialog('You have unsaved changes.', 'Create a new project anyway?').then((ok) => {
+            if (ok) useProjectStore.getState().newProject()
+          })
+        } else {
+          useProjectStore.getState().newProject()
+        }
       } else if (mod && e.key === 'o') {
         e.preventDefault()
-        if (useProjectStore.getState().isDirty) {
-          if (!window.confirm('You have unsaved changes. Open another project anyway?')) return
+        const proceed = (): void => {
+          window.electronAPI.loadProject().then((loaded) => {
+            if (loaded) {
+              useProjectStore.getState().openProject(loaded.project, loaded.filePath)
+              useSettingsStore.getState().addRecentProject(loaded.filePath, loaded.project.name)
+            }
+          })
         }
-        window.electronAPI.loadProject().then((loaded) => {
-          if (loaded) {
-            useProjectStore.getState().openProject(loaded.project, loaded.filePath)
-            useSettingsStore.getState().addRecentProject(loaded.filePath, loaded.project.name)
-          }
-        })
+        if (useProjectStore.getState().isDirty) {
+          window.electronAPI.showConfirmDialog('You have unsaved changes.', 'Open another project anyway?').then((ok) => {
+            if (ok) proceed()
+          })
+        } else {
+          proceed()
+        }
       }
     },
     []
@@ -93,17 +103,19 @@ export default function App(): JSX.Element {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [handleKeyDown])
 
-  // Warn on close if dirty
+  // Window close — handled via IPC from main process for reliable behavior
   useEffect(() => {
-    const handler = (e: BeforeUnloadEvent): string | undefined => {
-      if (isDirty) {
-        e.preventDefault()
-        return 'You have unsaved changes. Are you sure you want to quit?'
+    window.electronAPI.onCheckClose(() => {
+      const dirty = useProjectStore.getState().isDirty
+      if (!dirty) {
+        window.electronAPI.forceClose()
+      } else {
+        window.electronAPI.showConfirmDialog('You have unsaved changes.', 'Close anyway?').then((ok) => {
+          if (ok) window.electronAPI.forceClose()
+        })
       }
-    }
-    window.addEventListener('beforeunload', handler)
-    return () => window.removeEventListener('beforeunload', handler)
-  }, [isDirty])
+    })
+  }, [])
 
   return (
     <ErrorBoundary>

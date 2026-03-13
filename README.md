@@ -2,159 +2,32 @@
 
 A modern desktop GUI for designing and generating [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes — without writing boilerplate.
 
-You visually configure your node's inputs, outputs, category, and flags. The app generates all the required Python code programmatically. An integrated LLM assistant writes the actual node logic (`execute()` body) based on your description.
+You visually configure your node's inputs, outputs, category, and flags. The app generates all the required Python code programmatically. An integrated LLM assistant writes the actual node logic (`execute()` body) based on your description, with full multi-turn conversation history so you can iterate.
 
 ---
 
-## What it does
+## Features
 
-| Feature | Details |
+### Visual node editor
+
+| Tab | What it does |
 |---|---|
-| **Visual node editor** | Configure inputs, outputs, category, flags — no Python required for the structure |
-| **All ComfyUI types** | IMAGE, LATENT, MODEL, VAE, CLIP, MASK, CONDITIONING, CONTROL_NET, INT, FLOAT, STRING, BOOLEAN, COMBO, and more |
-| **Widget config** | INT/FLOAT with min/max/step/round, STRING multiline, COMBO option lists, forceInput toggle |
-| **Advanced flags** | OUTPUT_NODE, INPUT_NODE, VALIDATE_INPUTS, IS_CHANGED (none / always / hash) |
-| **LLM code generation** | Describe what the node does → LLM writes the `execute()` body |
-| **7 LLM providers** | OpenAI, Anthropic (Claude), Google Gemini, Groq, xAI (Grok), OpenRouter, Ollama (local) |
-| **Live code preview** | Monaco Editor shows generated Python in real time |
-| **Export options** | Single `.py` file or full package (`__init__.py` + `nodes.py` + `requirements.txt` + `README.md`) |
-| **Save / load projects** | `.cnd` project files — design nodes over multiple sessions |
+| **Identity** | Internal name (snake_case), display name, category, pack folder toggle |
+| **Inputs** | Add/edit/reorder input sockets and widgets with full type and config |
+| **Outputs** | Add/edit/reorder output sockets |
+| **Advanced** | OUTPUT_NODE, INPUT_NODE, VALIDATE_INPUTS, IS_CHANGED flags |
+| **Preview** | Read-only Monaco Editor showing the full generated Python in real time |
+| **AI Assistant** | Multi-turn LLM chat for generating or rewriting node logic |
 
----
+### Node pack management
 
-## Screenshots
+- All nodes in a project export together as a single ComfyUI custom node pack
+- Configure **Pack Name** (used as folder name — `ComfyUI_` prefix recommended) and **Project Display Name** separately
+- **Export preview** shows the output file tree before you export
+- Set a persistent **Export Location** (your `ComfyUI/custom_nodes/` folder) for one-click export from the toolbar or Pack tab
+- Exported structure: `PackName/__init__.py` + `PackName/nodes/<node>.py` + `PackName/README.md`
 
-> *(Coming soon)*
-
----
-
-## Requirements
-
-- **Node.js** 18 or newer — [nodejs.org](https://nodejs.org)
-- **npm** (comes with Node.js)
-- **Git** — [git-scm.com](https://git-scm.com)
-
-That's it. You do **not** need Python, ComfyUI, or any other tools installed to run the designer itself.
-
----
-
-## Getting started (beginner-friendly)
-
-### 1. Install Node.js
-
-Download and install Node.js from [nodejs.org](https://nodejs.org). Choose the **LTS** version.
-
-To verify the install worked, open a terminal and run:
-
-```
-node --version
-npm --version
-```
-
-Both commands should print a version number.
-
-### 2. Clone the repository
-
-```bash
-git clone https://github.com/MNeMoNiCuZ/ComfyNodeDesigner.git
-cd ComfyNodeDesigner
-```
-
-### 3. Install dependencies
-
-```bash
-npm install
-```
-
-This downloads all the required packages into a `node_modules/` folder. It only needs to be done once (or after pulling new changes).
-
-### 4. Run in development mode
-
-```bash
-npm run dev
-```
-
-The app will open. Any changes you make to the source code will hot-reload automatically.
-
----
-
-## Building a distributable app
-
-To build a standalone installer/executable for your platform:
-
-```bash
-npm run package
-```
-
-This outputs to the `dist/` folder:
-- **Windows** → `.exe` installer (NSIS)
-- **macOS** → `.dmg`
-- **Linux** → `.AppImage`
-
-> **Note:** To build for a different platform you need to run the build on that platform (or use CI).
-
----
-
-## Using the app
-
-### Creating a node
-
-1. Click **Add Node** in the left sidebar
-2. Fill in the **Identity** tab: internal name (snake_case), display name, category
-3. Go to **Inputs** → click **Add Input** to add each input socket/widget
-4. Go to **Outputs** → click **Add Output** to add each output socket
-5. Optionally configure **Advanced** flags (OUTPUT_NODE, IS_CHANGED, etc.)
-6. Open **Preview** to see the generated Python code
-
-### Generating logic with an LLM
-
-1. Click **⚙ Settings** (top right) and enter your API key for a provider
-2. Select the **LLM Logic** tab for your node
-3. Choose your provider and model
-4. Describe what the node should do in plain English
-5. Click **Generate** — the LLM writes the `execute()` body
-6. Edit the code in the Monaco editor if needed
-7. Click **Apply to Node**
-
-### Exporting
-
-- Click **Export** in the toolbar (top right) or the **Preview** tab
-- Choose **Single .py file** (drop it straight into `ComfyUI/custom_nodes/`)
-  or **Full package** (creates a proper folder with `__init__.py`, `nodes.py`, etc.)
-
-### Saving your work
-
-- **Ctrl+S** — Save project as a `.cnd` file
-- **Ctrl+O** — Open an existing `.cnd` project
-- **Ctrl+N** — New project
-
----
-
-## LLM Provider Setup
-
-API keys are encrypted and stored locally on your machine using Electron's `safeStorage`. They are never sent anywhere except to the provider's own API.
-
-| Provider | Where to get an API key |
-|---|---|
-| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| Anthropic | [console.anthropic.com](https://console.anthropic.com) |
-| Google Gemini | [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
-| Groq | [console.groq.com/keys](https://console.groq.com/keys) |
-| xAI (Grok) | [console.x.ai](https://console.x.ai) |
-| OpenRouter | [openrouter.ai/keys](https://openrouter.ai/keys) |
-| Ollama (local) | No key needed — install [Ollama](https://ollama.com) and run a model locally |
-
-### Using Ollama (free, local, no API key)
-
-1. Install Ollama from [ollama.com](https://ollama.com)
-2. Pull a model: `ollama pull llama3.3` (or any code model, e.g. `codellama`)
-3. In the app, open **Settings → Ollama**
-4. Click **Fetch Models** to load your installed models
-5. Select a model and use it — no key required
-
----
-
-## Supported ComfyUI Types
+### All ComfyUI types
 
 | Type | Category |
 |---|---|
@@ -169,7 +42,203 @@ API keys are encrypted and stored locally on your machine using Electron's `safe
 | `GLIGEN` | Model |
 | `AUDIO` | Other |
 | `INT`, `FLOAT`, `STRING`, `BOOLEAN`, `COMBO` | Primitive (widget) |
+| `SEED` | Special — name the input `seed` and ComfyUI auto-adds the **Control After Generate** widget |
 | `*` | Any / Wildcard |
+
+### Widget configuration
+
+- **INT / FLOAT** — min, max, step, default, round
+- **STRING** — single-line or multiline textarea
+- **COMBO** — dropdown with a configurable list of options
+- **forceInput** toggle — expose any widget type as a connector instead of an inline control
+
+### Advanced flags
+
+| Flag | Effect |
+|---|---|
+| `OUTPUT_NODE` | Node always executes; use for save/preview/side-effect nodes |
+| `INPUT_NODE` | Marks node as an external data source |
+| `VALIDATE_INPUTS` | Generates a `validate_inputs()` stub called before `execute()` |
+| `IS_CHANGED: none` | Default ComfyUI caching — re-runs only when inputs change |
+| `IS_CHANGED: always` | Forces re-execution every run (randomness, timestamps, live data) |
+| `IS_CHANGED: hash` | Generates an MD5 hash of inputs; re-runs only when hash changes |
+
+### AI assistant
+
+- **Functionality Edit** mode — LLM writes only the `execute()` body; safe with weaker local models
+- **Full Node** mode — LLM rewrites the entire class structure (inputs, outputs, execute body)
+- **Multi-turn chat** — full conversation history per node, per mode, persisted across sessions
+- **Configurable context window** — control how many past messages are sent to the LLM
+- **Abort / cancel** — stop generation mid-stream
+- **Proposal preview** — proposed changes are shown as a diff in the Inputs/Outputs tabs before you accept
+- **Custom AI instructions** — extra guidance appended to the system prompt, scoped to global / provider / model
+
+### 7 LLM providers
+
+OpenAI, Anthropic (Claude), Google Gemini, Groq, xAI (Grok), OpenRouter, Ollama (local)
+
+- API keys encrypted and stored locally via Electron `safeStorage` — never sent anywhere except the provider's own API
+- Test connection button per provider
+- Fetch available models from Ollama or Groq with one click
+- Add custom model names for any provider
+
+### Import existing node packs
+
+- **Import from file** — parse a single `.py` file
+- **Import from folder** — recursively scans a ComfyUI pack folder, handles:
+  - Multi-file packs where classes are split across individual `.py` files
+  - Cross-file class lookup (classes defined in separate files, imported via `__init__.py`)
+  - Utility inlining — relative imports (e.g. `from .utils import helper`) are detected and their source is inlined into the imported execute body
+  - Emoji and Unicode node names
+
+### Project files
+
+- Save and load `.cnd` project files — design nodes across multiple sessions
+- **Recent projects** list (configurable count, can be disabled)
+- Unsaved-changes guard on close, new, and open
+
+### Other
+
+- **Resizable sidebar** — drag the edge to adjust the node list width
+- **Drag-to-reorder nodes** in the sidebar
+- **Duplicate / delete** nodes with confirmation
+- **Per-type color overrides** — customize the connection wire colors for any ComfyUI type
+- **Native OS dialogs** for confirmations (not browser alerts)
+- **Keyboard shortcuts**: `Ctrl+S` save, `Ctrl+O` open, `Ctrl+N` new project
+
+---
+
+## Requirements
+
+- **Node.js** 18 or newer — [nodejs.org](https://nodejs.org)
+- **npm** (comes with Node.js)
+- **Git** — [git-scm.com](https://git-scm.com)
+
+You do **not** need Python, ComfyUI, or any other tools installed to run the designer itself.
+
+---
+
+## Getting started
+
+### 1. Install Node.js
+
+Download and install Node.js from [nodejs.org](https://nodejs.org). Choose the **LTS** version.
+
+Verify the install:
+
+```
+node --version
+npm --version
+```
+
+### 2. Clone the repository
+
+```bash
+git clone https://github.com/MNeMoNiCuZ/ComfyNodeDesigner.git
+cd ComfyNodeDesigner
+```
+
+### 3. Install dependencies
+
+```bash
+npm install
+```
+
+This downloads all required packages into `node_modules/`. Only needed once (or after pulling new changes).
+
+### 4. Run in development mode
+
+```bash
+npm run dev
+```
+
+The app opens automatically. Source code changes hot-reload.
+
+---
+
+## Building a distributable app
+
+```bash
+npm run package
+```
+
+Output goes to `dist/`:
+
+- **Windows** → `.exe` installer (NSIS, with directory choice)
+- **macOS** → `.dmg`
+- **Linux** → `.AppImage`
+
+> To build for a different platform you must run on that platform (or use CI).
+
+---
+
+## Using the app
+
+### Creating a node
+
+1. Click **Add Node** in the left sidebar (or the `+` button at the top)
+2. Fill in the **Identity** tab: internal name (snake_case), display name, category
+3. Go to **Inputs** → **Add Input** to add each input socket or widget
+4. Go to **Outputs** → **Add Output** to add each output socket
+5. Optionally configure **Advanced** flags
+6. Open **Preview** to see the generated Python
+
+### Generating logic with an LLM
+
+1. Open the **Settings** tab (gear icon, top right) and enter your API key for a provider
+2. Select the **AI Assistant** tab for your node
+3. Choose your provider and model
+4. Type a description of what the node should do
+5. Hit **Send** — the LLM writes the `execute()` body (or full class in Full Node mode)
+6. Review the proposal — a diff preview appears in the Inputs/Outputs tabs
+7. Click **Accept** to apply the changes, or keep chatting to refine
+
+### Exporting
+
+Point the **Export Location** (Pack tab or Settings) at your `ComfyUI/custom_nodes/` folder, then:
+
+- Click **Export** in the toolbar for one-click export to that path
+- Or use **Export Now** in the Pack tab
+
+The pack folder is created (or overwritten) automatically. Then restart ComfyUI.
+
+### Importing an existing node pack
+
+- Click **Import** in the toolbar
+- Choose **From File** (single `.py`) or **From Folder** (full pack directory)
+- Detected nodes are added to the current project
+
+### Saving your work
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+S` | Save project (prompts for path if new) |
+| `Ctrl+O` | Open `.cnd` project file |
+| `Ctrl+N` | New project |
+
+---
+
+## LLM Provider Setup
+
+API keys are encrypted and stored locally using Electron's `safeStorage`. They are never sent anywhere except to the provider's own API endpoint.
+
+| Provider | Where to get an API key |
+|---|---|
+| OpenAI | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+| Anthropic | [console.anthropic.com](https://console.anthropic.com) |
+| Google Gemini | [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
+| Groq | [console.groq.com/keys](https://console.groq.com/keys) |
+| xAI (Grok) | [console.x.ai](https://console.x.ai) |
+| OpenRouter | [openrouter.ai/keys](https://openrouter.ai/keys) |
+| Ollama (local) | No key needed — install [Ollama](https://ollama.com) and pull a model |
+
+### Using Ollama (free, local, no API key)
+
+1. Install Ollama from [ollama.com](https://ollama.com)
+2. Pull a model: `ollama pull llama3.3` (or any code model, e.g. `qwen2.5-coder`)
+3. In the app, open **Settings → Ollama**
+4. Click **Fetch Models** to load your installed models
+5. Select a model and start chatting — no key required
 
 ---
 
@@ -181,23 +250,24 @@ ComfyNodeDesigner/
 │   ├── main/                    # Electron main process (Node.js)
 │   │   ├── index.ts             # Window creation and IPC registration
 │   │   ├── ipc/
-│   │   │   ├── fileHandlers.ts  # Save/load/export — uses Electron dialogs + fs
-│   │   │   └── llmHandlers.ts   # All LLM provider adapters
+│   │   │   ├── fileHandlers.ts  # Save/load/export/import — uses Electron dialogs + fs
+│   │   │   └── llmHandlers.ts   # All 7 LLM provider adapters with abort support
 │   │   └── generators/
-│   │       └── codeGenerator.ts # Python code generation logic
+│   │       ├── codeGenerator.ts # Python code generation logic
+│   │       └── nodeImporter.ts  # Python node pack parser (folder + file import)
 │   ├── preload/
 │   │   └── index.ts             # contextBridge — secure API surface for renderer
 │   └── renderer/src/            # React UI
 │       ├── App.tsx
 │       ├── components/
 │       │   ├── layout/          # TitleBar, NodePanel, NodeEditor
-│       │   ├── tabs/            # Identity, Inputs, Outputs, Advanced, LLM, Preview
-│       │   ├── modals/          # InputEditModal, SettingsModal, ExportModal
-│       │   ├── shared/          # TypeSelector, TooltipWrapper, CodeBadge
+│       │   ├── tabs/            # Identity, Inputs, Outputs, Advanced, Preview, AI, Pack, Settings
+│       │   ├── modals/          # InputEditModal, OutputEditModal, ExportModal, ImportModal
+│       │   ├── shared/          # TypeBadge, TypeSelector, ExportToast, etc.
 │       │   └── ui/              # shadcn/Radix UI primitives
-│       ├── store/               # Zustand state (project + settings)
+│       ├── store/               # Zustand state (projectStore, settingsStore)
 │       ├── types/               # TypeScript interfaces
-│       └── lib/                 # Utilities, ComfyUI type registry
+│       └── lib/                 # Utilities, ComfyUI type registry, node operations
 ```
 
 ---
@@ -209,9 +279,19 @@ ComfyNodeDesigner/
 - **electron-vite** — build tooling
 - **TailwindCSS v3** — styling
 - **shadcn/ui** (Radix UI) — component library
-- **Monaco Editor** — code preview and editing
+- **Monaco Editor** — code preview
 - **Zustand** — state management
-- **react-hook-form + zod** — form validation
+
+---
+
+## Key commands
+
+```bash
+npm run dev        # Start in development mode
+npm run build      # Production build (outputs to out/)
+npm test           # Run vitest tests
+npm run package    # Package as platform installer (dist/)
+```
 
 ---
 

@@ -4,13 +4,16 @@ import { type ComfyNodeDef, type Project, createDefaultNode } from '../types/nod
 interface ProjectState {
   project: Project
   selectedNodeId: string | null
+  packSelected: boolean
   isDirty: boolean
   currentFilePath: string | null
+  llmSnapshots: Record<string, ComfyNodeDef[]>
 
   // Project-level actions
   setProject: (project: Project) => void
   openProject: (project: Project, filePath: string) => void
   setProjectName: (name: string) => void
+  setPackName: (packName: string) => void
   newProject: () => void
 
   // Node actions
@@ -20,7 +23,12 @@ interface ProjectState {
   duplicateNode: (id: string) => void
   reorderNodes: (fromIndex: number, toIndex: number) => void
   selectNode: (id: string | null) => void
+  selectPack: () => void
   importNodes: (nodes: ComfyNodeDef[]) => void
+
+  // LLM snapshot actions
+  pushLLMSnapshot: (nodeId: string, node: ComfyNodeDef) => void
+  popLLMSnapshot: (nodeId: string) => void
 
   // Persistence
   setDirty: (dirty: boolean) => void
@@ -31,6 +39,7 @@ function createNewProject(name = 'Untitled Project'): Project {
   return {
     version: '1.0',
     name,
+    packName: 'ComfyUI_',
     nodes: [],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString()
@@ -40,12 +49,14 @@ function createNewProject(name = 'Untitled Project'): Project {
 export const useProjectStore = create<ProjectState>((set, get) => ({
   project: createNewProject(),
   selectedNodeId: null,
+  packSelected: false,
   isDirty: false,
   currentFilePath: null,
+  llmSnapshots: {},
 
-  setProject: (project) => set({ project, isDirty: false, selectedNodeId: null }),
+  setProject: (project) => set({ project, isDirty: false, selectedNodeId: null, packSelected: false }),
 
-  openProject: (project, filePath) => set({ project, isDirty: false, currentFilePath: filePath, selectedNodeId: null }),
+  openProject: (project, filePath) => set({ project, isDirty: false, currentFilePath: filePath, selectedNodeId: null, packSelected: false }),
 
   setProjectName: (name) =>
     set((state) => ({
@@ -53,10 +64,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       isDirty: true
     })),
 
+  setPackName: (packName) =>
+    set((state) => ({
+      project: { ...state.project, packName, updatedAt: new Date().toISOString() },
+      isDirty: true
+    })),
+
   newProject: () =>
     set({
       project: createNewProject(),
       selectedNodeId: null,
+      packSelected: false,
       isDirty: false,
       currentFilePath: null
     }),
@@ -131,7 +149,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       }
     }),
 
-  selectNode: (id) => set({ selectedNodeId: id }),
+  selectNode: (id) => set({ selectedNodeId: id, packSelected: false }),
+
+  selectPack: () => set({ selectedNodeId: null, packSelected: true }),
 
   importNodes: (nodes) =>
     set((state) => ({
@@ -142,6 +162,34 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       },
       isDirty: true
     })),
+
+  pushLLMSnapshot: (nodeId, node) => {
+    set((state) => {
+      const existing = state.llmSnapshots[nodeId] ?? []
+      const clone = JSON.parse(JSON.stringify(node)) as ComfyNodeDef
+      const updated = [...existing, clone].slice(-20)
+      return { llmSnapshots: { ...state.llmSnapshots, [nodeId]: updated } }
+    })
+  },
+
+  popLLMSnapshot: (nodeId) => {
+    const state = get()
+    const snapshots = state.llmSnapshots[nodeId]
+    if (!snapshots || snapshots.length === 0) return
+    const last = snapshots[snapshots.length - 1]
+    set((st) => {
+      const remaining = snapshots.slice(0, -1)
+      return {
+        llmSnapshots: { ...st.llmSnapshots, [nodeId]: remaining },
+        project: {
+          ...st.project,
+          nodes: st.project.nodes.map((n) => (n.id === nodeId ? { ...last } : n)),
+          updatedAt: new Date().toISOString()
+        },
+        isDirty: true
+      }
+    })
+  },
 
   setDirty: (dirty) => set({ isDirty: dirty }),
 
