@@ -39,6 +39,7 @@ export function PackTab(): JSX.Element {
     const t = setTimeout(() => {
       if (localProjectName !== project.name) setProjectName(localProjectName)
     }, 300)
+    return () => clearTimeout(t)
   }, [localProjectName])
 
   const sanitized = localPackName.replace(/[^a-zA-Z0-9_-]/g, '_') || 'ComfyUI_Pack'
