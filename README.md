@@ -13,7 +13,7 @@ An integrated LLM assistant writes the actual node logic (`execute()` body) base
 
 Preview your node visually to see something like what it will look like in ComfyUI.
 
-<img width="742" height="535" alt="image" src="https://github.com/user-attachments/assets/ed4ba531-50c7-44a9-82ae-13708187321f" />
+<img width="708" height="448" alt="image" src="https://github.com/user-attachments/assets/8c6291e7-63ab-40e1-88e1-f4bf21c71415" />
 
 View the code for the node.
 
