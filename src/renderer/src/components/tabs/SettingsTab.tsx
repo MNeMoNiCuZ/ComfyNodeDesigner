@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw, X, Plus, ChevronDown, ChevronRight, Star } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
-const PROVIDERS: LLMProvider[] = ['openai', 'anthropic', 'google', 'groq', 'xai', 'openrouter', 'ollama']
+const PROVIDERS: LLMProvider[] = ['openai', 'anthropic', 'google', 'groq', 'xai', 'minimax', 'openrouter', 'ollama']
 
 type SettingsSubTab = 'general' | 'color' | 'ai' | 'prompts'
 
@@ -409,8 +409,8 @@ function AIAssistantSubTab(): JSX.Element {
                 </div>
               )}
 
-              {/* Base URL (Ollama / OpenRouter / xAI) */}
-              {(provider === 'ollama' || provider === 'openrouter' || provider === 'xai') && (
+              {/* Base URL (Ollama / OpenRouter / xAI / MiniMax) */}
+              {(provider === 'ollama' || provider === 'openrouter' || provider === 'xai' || provider === 'minimax') && (
                 <div className="space-y-1.5">
                   <Label className="text-xs text-slate-400">Base URL</Label>
                   <div className="flex gap-2">
@@ -422,7 +422,9 @@ function AIAssistantSubTab(): JSX.Element {
                           ? 'http://localhost:11434'
                           : provider === 'openrouter'
                             ? 'https://openrouter.ai/api/v1'
-                            : 'https://api.x.ai/v1'
+                            : provider === 'minimax'
+                              ? 'https://api.minimax.io/v1'
+                              : 'https://api.x.ai/v1'
                       }
                       className="font-mono text-sm"
                     />

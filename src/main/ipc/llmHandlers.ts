@@ -238,6 +238,8 @@ function getAdapter(req: LLMGenerateRequest, apiKey: string): LLMAdapter {
       return getGroqAdapter(apiKey)
     case 'xai':
       return getOpenAICompatibleAdapter(apiKey, req.baseUrl ?? 'https://api.x.ai/v1')
+    case 'minimax':
+      return getOpenAICompatibleAdapter(apiKey, req.baseUrl ?? 'https://api.minimax.io/v1')
     case 'openrouter':
       return getOpenAICompatibleAdapter(apiKey, req.baseUrl ?? 'https://openrouter.ai/api/v1')
     case 'ollama':
