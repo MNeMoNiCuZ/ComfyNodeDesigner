@@ -69,7 +69,7 @@
   },
   "build": {
     "appId": "com.mnemonicuz.comfynodedesigner",
-    "productName": "ComfyNode Designer",
+    "productName": "Comfy Node Designer",
     "icon": "src/assets/ComfyUINodeDesigner.png",
     "directories": {
       "output": "dist"

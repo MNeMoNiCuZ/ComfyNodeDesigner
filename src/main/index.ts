@@ -152,7 +152,7 @@ app.whenReady().then(() => {
       buttons: ['OK', 'Cancel'],
       defaultId: 0,
       cancelId: 1,
-      title: 'ComfyNode Designer',
+      title: 'Comfy Node Designer',
       message,
       detail
     })

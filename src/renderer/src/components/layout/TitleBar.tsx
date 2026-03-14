@@ -7,11 +7,11 @@ import {
   FolderOpen,
   Save,
   Download,
-  Box,
   Pencil,
   ChevronDown,
   Upload
 } from 'lucide-react'
+import appIcon from '../../assets/ComfyUINodeDesigner.png'
 import { ImportModal } from '../modals/ImportModal'
 import { ExportToast } from '../shared/ExportToast'
 import { cn } from '../../lib/utils'
@@ -201,8 +201,8 @@ export function TitleBar(): JSX.Element {
       <div className="titlebar-drag flex h-9 items-center bg-slate-900 border-b border-slate-700/50 px-3 pr-36 gap-2 select-none">
         {/* App icon + title — stays draggable */}
         <div className="flex items-center gap-2 mr-4">
-          <Box className="h-4 w-4 text-blue-400 shrink-0" />
-          <span className="text-sm font-semibold text-slate-200">ComfyNode Designer</span>
+          <img src={appIcon} alt="Comfy Node Designer" className="h-4 w-4 shrink-0" />
+          <span className="text-sm font-semibold text-slate-200">Comfy Node Designer</span>
         </div>
 
         {/* File actions */}

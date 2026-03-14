@@ -1,4 +1,4 @@
-# ComfyNode Designer
+# Comfy Node Designer
 
 A desktop GUI for designing and generating [ComfyUI](https://github.com/comfyanonymous/ComfyUI) custom nodes — without writing boilerplate.
 
