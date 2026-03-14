@@ -68,6 +68,7 @@ export function applyOperations(
           if (op.widget.step !== undefined) widget.step = Number(op.widget.step)
           if (op.widget.default !== undefined) widget.default = op.widget.default
           if (op.widget.multiline !== undefined) widget.multiline = Boolean(op.widget.multiline)
+          if (op.widget.placeholder !== undefined) widget.placeholder = String(op.widget.placeholder)
           if (Array.isArray(op.widget.comboOptions)) widget.comboOptions = op.widget.comboOptions
         }
         inputs.push({
@@ -92,12 +93,18 @@ export function applyOperations(
           return { error: `update_input: input "${op.name}" not found` }
         }
         const updates = op.updates ?? op
+        const typeChanged = updates.type && String(updates.type).toUpperCase() !== inputs[idx].type
         if (updates.type) {
           const t = String(updates.type).toUpperCase()
           if (!VALID_COMFY_TYPES.has(t)) {
             return { error: `update_input "${op.name}": invalid type "${updates.type}"` }
           }
           inputs[idx].type = t as ComfyType
+          // Clear stale widget config when type changes
+          if (typeChanged) {
+            inputs[idx].widget = WIDGET_INPUT_TYPES.has(t) ? {} : undefined
+            inputs[idx].forceInput = false
+          }
         }
         if (updates.required !== undefined) inputs[idx].required = Boolean(updates.required)
         if (updates.forceInput !== undefined) inputs[idx].forceInput = Boolean(updates.forceInput)
@@ -110,6 +117,7 @@ export function applyOperations(
             if (updates.widget.step !== undefined) w.step = Number(updates.widget.step)
             if (updates.widget.default !== undefined) w.default = updates.widget.default
             if (updates.widget.multiline !== undefined) w.multiline = Boolean(updates.widget.multiline)
+            if (updates.widget.placeholder !== undefined) w.placeholder = String(updates.widget.placeholder)
             if (Array.isArray(updates.widget.comboOptions))
               w.comboOptions = updates.widget.comboOptions
             inputs[idx].widget = w
@@ -219,7 +227,6 @@ export function applyOperations(
         if (typeof op.description === 'string') identityUpdates.description = op.description
         if (typeof op.functionName === 'string') identityUpdates.functionName = op.functionName
         if (typeof op.usePackFolder === 'boolean') identityUpdates.usePackFolder = op.usePackFolder
-        Object.assign(node, identityUpdates) // mutate local copy for change tracking
         changes.push(`identity(${Object.keys(identityUpdates).join(', ')})`)
         return { updates: { inputs, outputs, executeBody, ...identityUpdates }, summary: changes.join(', ') }
       }

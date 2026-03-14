@@ -4,6 +4,7 @@ import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
 import { generateAllFiles } from '../../../../main/generators/codeGenerator'
 import { applyOperations } from '../../lib/nodeOperations'
+import { parseNodeCode } from '../../lib/codeParser'
 import { Button } from '../ui/button'
 import { Diff, Save, X, Lock } from 'lucide-react'
 import type { ComfyNodeDef } from '../../types/node.types'
@@ -14,41 +15,6 @@ interface PreviewTabProps {
 
 type ViewMode = 'node_file' | 'init_py_individual' | 'nodes_py' | 'init_py'
 
-/**
- * Extract the body of the execute function from a generated node file.
- * Returns null if the function cannot be found.
- */
-function extractExecuteBody(code: string, functionName: string): string | null {
-  const lines = code.split('\n')
-  let defIdx = -1
-  for (let i = 0; i < lines.length; i++) {
-    if (/^    def /.test(lines[i]) && lines[i].includes(`def ${functionName}(`)) {
-      defIdx = i
-      break
-    }
-  }
-  if (defIdx === -1) return null
-
-  const bodyLines: string[] = []
-  for (let i = defIdx + 1; i < lines.length; i++) {
-    const line = lines[i]
-    if (line === '' || line.trim() === '') {
-      bodyLines.push('')
-    } else if (/^        /.test(line)) {
-      bodyLines.push(line)
-    } else {
-      break
-    }
-  }
-
-  // Trim trailing blank lines
-  while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === '') {
-    bodyLines.pop()
-  }
-
-  if (bodyLines.length === 0) return null
-  return bodyLines.join('\n')
-}
 
 export function PreviewTab({ node }: PreviewTabProps = {}): JSX.Element {
   const { project, updateNode } = useProjectStore()
@@ -137,14 +103,18 @@ export function PreviewTab({ node }: PreviewTabProps = {}): JSX.Element {
   })()
 
   function handleSaveEdit(): void {
-    if (!editedCode || !node || !displayNode) return
+    if (!editedCode || !node) return
     setSaveError(null)
-    const body = extractExecuteBody(editedCode, displayNode.functionName)
-    if (body === null) {
-      setSaveError(`Could not locate def ${displayNode.functionName}() in edited code`)
+    const parsed = parseNodeCode(editedCode, node)
+    if (!parsed) {
+      setSaveError('Could not parse inputs, outputs, or function body from the edited code')
       return
     }
-    updateNode(node.id, { executeBody: body })
+    updateNode(node.id, {
+      inputs: parsed.inputs,
+      outputs: parsed.outputs,
+      executeBody: parsed.executeBody
+    })
     setEditedCode(null)
   }
 

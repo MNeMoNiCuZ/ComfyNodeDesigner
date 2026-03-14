@@ -33,6 +33,7 @@ export interface InputWidget {
   step?: number
   round?: number
   multiline?: boolean
+  placeholder?: string
   comboOptions?: string[]
   default?: string | number | boolean
 }

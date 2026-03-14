@@ -4,7 +4,7 @@ import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
 import { Button } from '../ui/button'
 import { TypeBadge } from '../shared/CodeBadge'
-import { Plus, Trash2, SquarePen, GripVertical, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, SquarePen, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { InputEditModal } from '../modals/InputEditModal'
 import { Switch } from '../ui/switch'
@@ -152,13 +152,6 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
               {showTopLine && (
                 <div className="absolute -top-0.5 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
               )}
-              {/* Proposal badges — absolutely positioned so they don't affect row layout */}
-              {isUpdated && (
-                <span className="absolute top-0.5 right-1 z-10 text-[10px] font-bold text-yellow-300 bg-yellow-900/60 border border-yellow-700/50 rounded px-1.5 py-0.5 pointer-events-none">WILL CHANGE</span>
-              )}
-              {isDeleted && (
-                <span className="absolute top-0.5 right-1 z-10 text-[10px] font-bold text-red-300 bg-red-900/60 border border-red-700/50 rounded px-1.5 py-0.5 pointer-events-none">WILL DELETE</span>
-              )}
               <div
                 draggable
                 onDragStart={() => setDragging(idx)}
@@ -180,56 +173,52 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
                   isDeleted && 'border-l-4 border-l-red-500 border-slate-700/60 opacity-60'
                 )}
               >
-                {/* LEFT: up/down + edit */}
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <div className="flex flex-col gap-0">
-                    <button
-                      className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-20 transition-colors"
-                      onClick={(e) => { e.stopPropagation(); handleMove(input.id, 'up') }}
-                      disabled={idx === 0}
-                      title="Move up"
-                    >
-                      <ChevronUp className="h-3 w-3" />
-                    </button>
-                    <button
-                      className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-20 transition-colors"
-                      onClick={(e) => { e.stopPropagation(); handleMove(input.id, 'down') }}
-                      disabled={idx === node.inputs.length - 1}
-                      title="Move down"
-                    >
-                      <ChevronDown className="h-3 w-3" />
-                    </button>
-                  </div>
+                {/* LEFT: up/down arrows */}
+                <div className="flex flex-col gap-0 shrink-0">
                   <button
-                    className="rounded p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-700 transition-colors"
-                    onClick={(e) => { e.stopPropagation(); setEditingInput(displayInput) }}
-                    title="Edit input (or double-click row)"
+                    className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-20 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); handleMove(input.id, 'up') }}
+                    disabled={idx === 0}
+                    title="Move up"
                   >
-                    <SquarePen className="h-3.5 w-3.5" />
+                    <ChevronUp className="h-3 w-3" />
+                  </button>
+                  <button
+                    className="rounded p-0.5 text-slate-600 hover:text-slate-300 hover:bg-slate-700 disabled:opacity-20 transition-colors"
+                    onClick={(e) => { e.stopPropagation(); handleMove(input.id, 'down') }}
+                    disabled={idx === node.inputs.length - 1}
+                    title="Move down"
+                  >
+                    <ChevronDown className="h-3 w-3" />
                   </button>
                 </div>
-
-                {/* Drag handle */}
-                <GripVertical className="drag-handle h-4 w-4 shrink-0 text-slate-700 group-hover:text-slate-500 cursor-grab" />
-
-                {/* Index */}
-                <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center">{idx}</span>
 
                 {/* Req/opt toggle */}
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-                      <span className="text-[10px] text-muted-foreground w-5">{input.required ? 'req' : 'opt'}</span>
+                    <div className="flex flex-col items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
                       <Switch
                         checked={input.required}
                         onCheckedChange={(checked) => handleToggleRequired(input.id, checked)}
                       />
+                      <span className="text-[9px] text-muted-foreground leading-none">{input.required ? 'Required' : 'Optional'}</span>
                     </div>
                   </TooltipTrigger>
                   <TooltipContent>
-                    {input.required ? 'Required — must be connected' : 'Optional — has a default or can be left disconnected'}
+                    {input.required
+                      ? 'Required — this input must be connected or have a default value'
+                      : 'Optional — this input can be left unconnected; ensure a default is set'}
                   </TooltipContent>
                 </Tooltip>
+
+                {/* Edit button */}
+                <button
+                  className="rounded p-1 text-slate-400 hover:text-blue-300 hover:bg-slate-700 transition-colors shrink-0"
+                  onClick={(e) => { e.stopPropagation(); setEditingInput(displayInput) }}
+                  title="Edit input (or double-click row)"
+                >
+                  <SquarePen className="h-8 w-8" />
+                </button>
 
                 {/* Type badge — fixed width so names align */}
                 <div className="w-[5.5rem] shrink-0 flex justify-center">
@@ -246,7 +235,13 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
                       {input.name}
                     </span>
                     {input.forceInput && (
-                      <span className="text-xs text-slate-500 bg-slate-700 rounded px-1">force_input</span>
+                      <span className="text-xs text-slate-500 bg-slate-700 rounded px-1">Force Input</span>
+                    )}
+                    {isUpdated && (
+                      <span className="text-[10px] font-bold text-yellow-300 bg-yellow-900/60 border border-yellow-700/50 rounded px-1.5 py-0.5">WILL CHANGE</span>
+                    )}
+                    {isDeleted && (
+                      <span className="text-[10px] font-bold text-red-300 bg-red-900/60 border border-red-700/50 rounded px-1.5 py-0.5">WILL DELETE</span>
                     )}
                   </div>
                   {isUpdated && displayInput.type !== input.type && (
@@ -279,11 +274,11 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
 
                 {/* RIGHT: trash */}
                 <button
-                  className="shrink-0 rounded p-1.5 text-slate-600 hover:text-red-400 hover:bg-slate-700 transition-colors"
+                  className="shrink-0 rounded p-1 text-slate-600 hover:text-red-400 hover:bg-slate-700 transition-colors"
                   onClick={(e) => { e.stopPropagation(); handleDelete(input.id) }}
                   title="Delete input"
                 >
-                  <Trash2 className="h-3.5 w-3.5" />
+                  <Trash2 className="h-8 w-8" />
                 </button>
               </div>
               {/* Drop indicator: after */}
@@ -316,50 +311,44 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
                   setViewingProposed(proposedInput)
                 }}
               >
-                {/* LEFT: disabled arrows + edit */}
-                <div className="flex items-center gap-0.5 shrink-0">
-                  <div className="flex flex-col gap-0 opacity-20">
-                    <button className="rounded p-0.5 text-slate-600 cursor-not-allowed" disabled>
-                      <ChevronUp className="h-3 w-3" />
-                    </button>
-                    <button className="rounded p-0.5 text-slate-600 cursor-not-allowed" disabled>
-                      <ChevronDown className="h-3 w-3" />
-                    </button>
-                  </div>
-                  <button
-                    className="rounded p-1.5 text-green-500 hover:text-green-300 hover:bg-slate-700 transition-colors"
-                    title="View proposed input (read-only)"
-                    onClick={() => {
-                      const proposedInput: NodeInput = {
-                        id: 'proposed-preview',
-                        name: op.name,
-                        type: opType as any,
-                        required: opRequired,
-                        forceInput: isForceInput,
-                        tooltip: op.tooltip ?? '',
-                        widget: op.widget
-                      }
-                      setViewingProposed(proposedInput)
-                    }}
-                  >
-                    <SquarePen className="h-3.5 w-3.5" />
+                {/* LEFT: disabled arrows */}
+                <div className="flex flex-col gap-0 shrink-0 opacity-20">
+                  <button className="rounded p-0.5 text-slate-600 cursor-not-allowed" disabled>
+                    <ChevronUp className="h-3 w-3" />
+                  </button>
+                  <button className="rounded p-0.5 text-slate-600 cursor-not-allowed" disabled>
+                    <ChevronDown className="h-3 w-3" />
                   </button>
                 </div>
 
-                {/* No drag handle for ghost rows */}
-                <div className="w-4 shrink-0" />
+                {/* Req display */}
+                <div className="flex flex-col items-center gap-0.5 shrink-0 opacity-60">
+                  <Switch checked={opRequired} onCheckedChange={() => {}} disabled />
+                  <span className="text-[9px] text-muted-foreground leading-none">{opRequired ? 'Required' : 'Optional'}</span>
+                </div>
 
-                {/* Index placeholder */}
-                <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center opacity-30">—</span>
+                {/* Edit button */}
+                <button
+                  className="rounded p-1 text-green-500 hover:text-green-300 hover:bg-slate-700 transition-colors shrink-0"
+                  title="View proposed input (read-only)"
+                  onClick={() => {
+                    const proposedInput: NodeInput = {
+                      id: 'proposed-preview',
+                      name: op.name,
+                      type: opType as any,
+                      required: opRequired,
+                      forceInput: isForceInput,
+                      tooltip: op.tooltip ?? '',
+                      widget: op.widget
+                    }
+                    setViewingProposed(proposedInput)
+                  }}
+                >
+                  <SquarePen className="h-4 w-4" />
+                </button>
 
                 {/* NEW badge */}
                 <span className="shrink-0 text-[10px] font-bold text-green-300 bg-green-900/40 border border-green-700/50 rounded px-1.5 py-0.5">NEW</span>
-
-                {/* Req display (non-interactive) */}
-                <div className="flex items-center gap-1 shrink-0 opacity-60">
-                  <span className="text-[10px] text-muted-foreground w-5">{opRequired ? 'req' : 'opt'}</span>
-                  <Switch checked={opRequired} onCheckedChange={() => {}} disabled />
-                </div>
 
                 {/* Type badge — fixed width so names align */}
                 <div className="w-[5.5rem] shrink-0 flex justify-center">
@@ -371,7 +360,7 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-green-300 font-mono">{op.name}</span>
                     {isForceInput && (
-                      <span className="text-xs text-slate-500 bg-slate-700 rounded px-1">force_input</span>
+                      <span className="text-xs text-slate-500 bg-slate-700 rounded px-1">Force Input</span>
                     )}
                     <span className="text-[10px] text-green-700 italic">(proposed)</span>
                   </div>

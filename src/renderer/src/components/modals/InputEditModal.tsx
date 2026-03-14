@@ -51,12 +51,14 @@ export function InputEditModal({ open, input, onSave, onClose, readOnly }: Input
 
   function setType(type: ComfyType): void {
     const newIsWidget = WIDGET_TYPES.has(type)
+    // Always reset widget when type changes — old config is meaningless for the new type
     setDraft((d) => ({
       ...d,
       type,
-      widget: newIsWidget ? (d.widget ?? {}) : undefined,
+      widget: newIsWidget ? {} : undefined,
       forceInput: newIsWidget ? d.forceInput : false
     }))
+    setComboOptionsText('')
   }
 
   function setWidget(updates: Partial<NonNullable<NodeInput['widget']>>): void {
@@ -138,8 +140,26 @@ export function InputEditModal({ open, input, onSave, onClose, readOnly }: Input
             />
           </div>
 
-          {/* Widget-specific config */}
+          {/* Force Input — always visible for widget types */}
           {isWidgetType && (
+            <div className="flex items-center justify-between">
+              <FieldLabel
+                label="Force Input"
+                tooltip="If enabled, this input always appears as a socket connection point instead of an inline widget. Use this when the value must come from another node. Widget configuration (default, min/max, multiline, etc.) does not apply when Force Input is on."
+              />
+              <Switch
+                checked={draft.forceInput ?? false}
+                onCheckedChange={(checked) => setDraft((d) => ({
+                  ...d,
+                  forceInput: checked,
+                  widget: checked ? {} : d.widget
+                }))}
+              />
+            </div>
+          )}
+
+          {/* Widget-specific config — hidden when Force Input is on */}
+          {isWidgetType && !draft.forceInput && (
             <div className="rounded-lg border border-slate-700 bg-slate-800/30 p-3 space-y-3">
               <p className="text-xs font-semibold text-slate-300">Widget Configuration</p>
 
@@ -202,21 +222,48 @@ export function InputEditModal({ open, input, onSave, onClose, readOnly }: Input
 
               {draft.type === 'STRING' && (
                 <div className="space-y-2">
-                  <div>
-                    <FieldLabel label="Default" tooltip="Default string value." />
-                    <Input
-                      value={draft.widget?.default as string ?? ''}
-                      onChange={(e) => setWidget({ default: e.target.value })}
-                      className="h-8 text-sm mt-1"
-                      placeholder=""
-                    />
-                  </div>
                   <div className="flex items-center justify-between">
                     <FieldLabel label="Multiline" tooltip="Show as a multiline textarea instead of single-line input." />
                     <Switch
                       checked={draft.widget?.multiline ?? false}
                       onCheckedChange={(checked) => setWidget({ multiline: checked })}
                     />
+                  </div>
+                  <div>
+                    <FieldLabel label="Default" tooltip="Default string value shown when the node is first added." />
+                    {draft.widget?.multiline ? (
+                      <Textarea
+                        value={draft.widget?.default as string ?? ''}
+                        onChange={(e) => setWidget({ default: e.target.value })}
+                        className="text-sm mt-1 min-h-[4rem] resize-y font-mono"
+                        placeholder=""
+                      />
+                    ) : (
+                      <Input
+                        value={draft.widget?.default as string ?? ''}
+                        onChange={(e) => setWidget({ default: e.target.value })}
+                        className="h-8 text-sm mt-1"
+                        placeholder=""
+                      />
+                    )}
+                  </div>
+                  <div>
+                    <FieldLabel label="Placeholder" tooltip="Grayed-out hint text shown when the field is empty." />
+                    {draft.widget?.multiline ? (
+                      <Textarea
+                        value={draft.widget?.placeholder ?? ''}
+                        onChange={(e) => setWidget({ placeholder: e.target.value || undefined })}
+                        className="text-sm mt-1 min-h-[4rem] resize-y font-mono"
+                        placeholder="Enter placeholder text…"
+                      />
+                    ) : (
+                      <Input
+                        value={draft.widget?.placeholder ?? ''}
+                        onChange={(e) => setWidget({ placeholder: e.target.value || undefined })}
+                        className="h-8 text-sm mt-1"
+                        placeholder="Enter placeholder text…"
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -255,17 +302,6 @@ export function InputEditModal({ open, input, onSave, onClose, readOnly }: Input
                 </div>
               )}
 
-              {/* Force input for widget types */}
-              <div className="flex items-center justify-between pt-1 border-t border-slate-700">
-                <FieldLabel
-                  label="forceInput"
-                  tooltip="If enabled, this widget type will always show as a socket (connection point) instead of an inline control, even though it's a widget type. Useful when you want to pass a value from another node."
-                />
-                <Switch
-                  checked={draft.forceInput ?? false}
-                  onCheckedChange={(checked) => setDraft((d) => ({ ...d, forceInput: checked }))}
-                />
-              </div>
             </div>
           )}
         </form>

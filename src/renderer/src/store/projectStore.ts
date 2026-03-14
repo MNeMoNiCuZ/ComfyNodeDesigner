@@ -1,5 +1,61 @@
 import { create } from 'zustand'
-import { type ComfyNodeDef, type Project, createDefaultNode } from '../types/node.types'
+import { type ComfyNodeDef, type NodeInput, type Project, createDefaultNode } from '../types/node.types'
+
+const WIDGET_TYPES = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
+
+/**
+ * Strip widget fields that are invalid for the input's type.
+ * Prevents stale data (e.g. comboOptions on a STRING) from persisting across saves.
+ */
+function sanitizeInput(input: NodeInput): NodeInput {
+  if (!WIDGET_TYPES.has(input.type) || input.forceInput) {
+    return { ...input, widget: undefined }
+  }
+  if (!input.widget) return input
+  const w = input.widget
+  switch (input.type) {
+    case 'INT':
+    case 'FLOAT': {
+      const clean: NodeInput['widget'] = {}
+      if (w.default !== undefined) clean.default = w.default
+      if (w.min !== undefined) clean.min = w.min
+      if (w.max !== undefined) clean.max = w.max
+      if (w.step !== undefined) clean.step = w.step
+      if (input.type === 'FLOAT' && w.round !== undefined) clean.round = w.round
+      return { ...input, widget: clean }
+    }
+    case 'STRING': {
+      const clean: NodeInput['widget'] = {}
+      if (w.default !== undefined) clean.default = w.default
+      if (w.multiline !== undefined) clean.multiline = w.multiline
+      if (w.placeholder !== undefined) clean.placeholder = w.placeholder
+      return { ...input, widget: clean }
+    }
+    case 'BOOLEAN': {
+      const clean: NodeInput['widget'] = {}
+      if (w.default !== undefined) clean.default = w.default
+      return { ...input, widget: clean }
+    }
+    case 'COMBO': {
+      const clean: NodeInput['widget'] = {}
+      if (Array.isArray(w.comboOptions)) clean.comboOptions = w.comboOptions
+      if (w.default !== undefined) clean.default = w.default
+      return { ...input, widget: clean }
+    }
+    default:
+      return { ...input, widget: undefined }
+  }
+}
+
+function sanitizeProject(project: Project): Project {
+  return {
+    ...project,
+    nodes: project.nodes.map((node) => ({
+      ...node,
+      inputs: node.inputs.map(sanitizeInput)
+    }))
+  }
+}
 
 interface ProjectState {
   project: Project
@@ -54,9 +110,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   currentFilePath: null,
   llmSnapshots: {},
 
-  setProject: (project) => set({ project, isDirty: false, selectedNodeId: null, packSelected: false }),
+  setProject: (project) => set({ project: sanitizeProject(project), isDirty: false, selectedNodeId: null, packSelected: false }),
 
-  openProject: (project, filePath) => set({ project, isDirty: false, currentFilePath: filePath, selectedNodeId: null, packSelected: false }),
+  openProject: (project, filePath) => set({ project: sanitizeProject(project), isDirty: false, currentFilePath: filePath, selectedNodeId: null, packSelected: false }),
 
   setProjectName: (name) =>
     set((state) => ({

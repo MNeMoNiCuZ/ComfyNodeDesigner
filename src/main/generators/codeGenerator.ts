@@ -71,6 +71,7 @@ function generateInputTypes(node: ComfyNodeDef): string {
         } else if (input.type === 'STRING') {
           if (w.multiline) cfg.push(`"multiline": True`)
           if (w.default !== undefined) cfg.push(`"default": ${JSON.stringify(w.default)}`)
+          if (w.placeholder !== undefined) cfg.push(`"placeholder": ${JSON.stringify(w.placeholder)}`)
         } else if (input.type === 'BOOLEAN') {
           if (w.default !== undefined) cfg.push(`"default": ${w.default ? 'True' : 'False'}`)
         } else if (input.type === 'COMBO') {

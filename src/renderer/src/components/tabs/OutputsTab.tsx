@@ -4,7 +4,7 @@ import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
 import { Button } from '../ui/button'
 import { TypeBadge } from '../shared/CodeBadge'
-import { Plus, Trash2, SquarePen, GripVertical, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, SquarePen, ChevronDown, ChevronUp } from 'lucide-react'
 import { cn } from '../../lib/utils'
 import { OutputEditModal } from '../modals/OutputEditModal'
 
@@ -186,12 +186,6 @@ export function OutputsTab({ node }: OutputsTabProps): JSX.Element {
                   </button>
                 </div>
 
-                {/* Drag handle */}
-                <GripVertical className="drag-handle h-4 w-4 shrink-0 text-slate-700 group-hover:text-slate-500 cursor-grab" />
-
-                {/* Index */}
-                <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center">{idx}</span>
-
                 {/* Proposal badges — absolutely positioned so they don't affect row layout */}
                 {isUpdated && (
                   <span className="absolute top-0.5 right-1 z-10 pointer-events-none text-[10px] font-bold text-yellow-300 bg-yellow-900/40 border border-yellow-700/50 rounded px-1.5 py-0.5">WILL CHANGE</span>
@@ -270,11 +264,6 @@ export function OutputsTab({ node }: OutputsTabProps): JSX.Element {
                     <SquarePen className="h-3.5 w-3.5" />
                   </button>
                 </div>
-
-                <div className="w-4 shrink-0" />
-
-                {/* Index placeholder */}
-                <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center opacity-30">—</span>
 
                 {/* NEW badge */}
                 <span className="shrink-0 text-[10px] font-bold text-green-300 bg-green-900/40 border border-green-700/50 rounded px-1.5 py-0.5">NEW</span>

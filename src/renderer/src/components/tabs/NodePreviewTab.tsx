@@ -109,7 +109,7 @@ function WidgetRow({ input }: WidgetRowProps): JSX.Element {
               ) : input.type === 'COMBO' ? (
                 <MockCombo options={w?.comboOptions ?? []} />
               ) : input.type === 'STRING' ? (
-                <MockText multiline={w?.multiline} defaultVal={w?.default as string | undefined} />
+                <MockText multiline={w?.multiline} defaultVal={w?.default as string | undefined} placeholder={w?.placeholder} />
               ) : (
                 <MockSlider
                   min={w?.min}
@@ -184,11 +184,23 @@ function MockCombo({ options }: { options: string[] }): JSX.Element {
   )
 }
 
-function MockText({ multiline, defaultVal }: { multiline?: boolean; defaultVal?: string }): JSX.Element {
+function MockText({ multiline, defaultVal, placeholder }: { multiline?: boolean; defaultVal?: string; placeholder?: string }): JSX.Element {
+  const displayText = defaultVal ? String(defaultVal) : undefined
+
+  if (multiline) {
+    return (
+      <div className="flex-1 bg-slate-700/60 border border-slate-600 rounded px-2 py-1 min-h-[3rem] max-h-20 overflow-hidden">
+        <span className={`text-xs block whitespace-pre-wrap break-words leading-tight ${displayText ? 'text-slate-300' : 'text-slate-500 italic'}`}>
+          {displayText ?? placeholder ?? ''}
+        </span>
+      </div>
+    )
+  }
+
   return (
-    <div className={`flex-1 bg-slate-700/60 border border-slate-600 rounded px-2 py-0.5 ${multiline ? 'h-8' : ''}`}>
-      <span className="text-xs text-slate-400 truncate">
-        {defaultVal ? String(defaultVal) : (multiline ? 'multiline text…' : 'text…')}
+    <div className="flex-1 bg-slate-700/60 border border-slate-600 rounded px-2 h-7 flex items-center">
+      <span className={`text-xs truncate ${displayText ? 'text-slate-300' : 'text-slate-500 italic'}`}>
+        {displayText ?? placeholder ?? ''}
       </span>
     </div>
   )
@@ -273,9 +285,6 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
               <div className="text-sm font-semibold text-slate-100 truncate">
                 {displayNode.displayName || displayNode.internalName}
               </div>
-              <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
-                {displayNode.category}
-              </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
               {displayNode.isOutputNode && (
@@ -305,32 +314,44 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
 
             {/* Socket connections — left inputs, right outputs side by side */}
             {(socketInputs.length > 0 || displayNode.outputs.length > 0) && (
-              <div className="flex">
-                {/* Left: socket inputs */}
-                <div className="flex-1 py-1 pr-2 pl-3">
-                  {socketInputs.map((input) => (
-                    <SocketInputRow key={input.id} input={input} />
-                  ))}
-                  {/* Pad to match output row count */}
-                  {Array.from({ length: Math.max(0, displayNode.outputs.length - socketInputs.length) }).map((_, i) => (
-                    <div key={`pad-${i}`} className="py-1 h-6" />
-                  ))}
+              <div>
+                {/* Column headers */}
+                <div className="flex px-3 pt-1.5 pb-0.5">
+                  <div className="flex-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold">
+                    {socketInputs.length > 0 ? 'Inputs' : ''}
+                  </div>
+                  {socketInputs.length > 0 && displayNode.outputs.length > 0 && <div style={{ width: 1 }} />}
+                  <div className="flex-1 text-[9px] uppercase tracking-widest text-slate-600 font-semibold text-right">
+                    {displayNode.outputs.length > 0 ? 'Outputs' : ''}
+                  </div>
                 </div>
+                <div className="flex">
+                  {/* Left: socket inputs */}
+                  <div className="flex-1 pb-1 pr-2 pl-3">
+                    {socketInputs.map((input) => (
+                      <SocketInputRow key={input.id} input={input} />
+                    ))}
+                    {/* Pad to match output row count */}
+                    {Array.from({ length: Math.max(0, displayNode.outputs.length - socketInputs.length) }).map((_, i) => (
+                      <div key={`pad-${i}`} className="py-1 h-6" />
+                    ))}
+                  </div>
 
-                {/* Divider */}
-                {socketInputs.length > 0 && displayNode.outputs.length > 0 && (
-                  <div style={{ width: 1, background: '#2d2d4a' }} />
-                )}
+                  {/* Divider */}
+                  {socketInputs.length > 0 && displayNode.outputs.length > 0 && (
+                    <div style={{ width: 1, background: '#2d2d4a' }} />
+                  )}
 
-                {/* Right: outputs */}
-                <div className="flex-1 py-1 pl-2 pr-3">
-                  {displayNode.outputs.map((output) => (
-                    <OutputRow key={output.id} output={output} />
-                  ))}
-                  {/* Pad to match input row count */}
-                  {Array.from({ length: Math.max(0, socketInputs.length - displayNode.outputs.length) }).map((_, i) => (
-                    <div key={`pad-${i}`} className="py-1 h-6" />
-                  ))}
+                  {/* Right: outputs */}
+                  <div className="flex-1 pb-1 pl-2 pr-3">
+                    {displayNode.outputs.map((output) => (
+                      <OutputRow key={output.id} output={output} />
+                    ))}
+                    {/* Pad to match input row count */}
+                    {Array.from({ length: Math.max(0, socketInputs.length - displayNode.outputs.length) }).map((_, i) => (
+                      <div key={`pad-${i}`} className="py-1 h-6" />
+                    ))}
+                  </div>
                 </div>
               </div>
             )}

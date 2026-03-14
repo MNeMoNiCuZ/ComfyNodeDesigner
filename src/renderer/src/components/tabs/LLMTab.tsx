@@ -13,6 +13,7 @@ import {
   validateAndTagOperations,
   diffOperationsAgainstNode
 } from '../../lib/nodeOperations'
+import { parseNodeCode } from '../../lib/codeParser'
 import type { NodeInput, NodeOutput } from '../../types/node.types'
 import {
   Loader2,
@@ -57,130 +58,6 @@ function copyToClipboard(text: string): void {
 // Full Code parser (simplified)
 // ---------------------------------------------------------------------------
 
-interface ParsedFullCode {
-  inputs: NodeInput[]
-  outputs: NodeOutput[]
-  executeBody: string
-}
-
-const VALID_COMFY_TYPES_LOCAL = new Set([
-  'IMAGE', 'LATENT', 'CONDITIONING', 'MODEL', 'VAE', 'CLIP', 'MASK',
-  'CONTROL_NET', 'STYLE_MODEL', 'CLIP_VISION', 'CLIP_VISION_OUTPUT',
-  'UPSCALE_MODEL', 'SAMPLER', 'SIGMAS', 'GUIDER', 'NOISE', 'GLIGEN',
-  'AUDIO', 'INT', 'FLOAT', 'STRING', 'BOOLEAN', 'SEED', 'COMBO', '*'
-])
-
-const WIDGET_INPUT_TYPES_LOCAL = new Set(['INT', 'FLOAT', 'STRING', 'BOOLEAN', 'COMBO'])
-
-function parseFullCodeResponse(
-  text: string,
-  node: ComfyNodeDef
-): ParsedFullCode | { error: string } {
-  // Strip markdown code fences if present
-  let code = text.trim()
-  const pyMatch = code.match(/```(?:python)?\s*\n([\s\S]*?)```/)
-  if (pyMatch) code = pyMatch[1].trim()
-
-  // Extract INPUT_TYPES
-  const inputs: NodeInput[] = []
-  const inputTypesMatch = code.match(
-    /def\s+INPUT_TYPES\s*\([^)]*\)\s*:\s*\n\s*return\s*\{([\s\S]*?)\n\s{4}\}/
-  )
-  if (inputTypesMatch) {
-    const block = inputTypesMatch[1]
-    const requiredMatch = block.match(/"required"\s*:\s*\{([\s\S]*?)\}/)
-    const optionalMatch = block.match(/"optional"\s*:\s*\{([\s\S]*?)\}/)
-
-    const parseInputBlock = (content: string, required: boolean): void => {
-      const inputPattern = /"(\w+)"\s*:\s*\((\[[\s\S]*?\]|"[^"]*")/g
-      let m: RegExpExecArray | null
-      while ((m = inputPattern.exec(content)) !== null) {
-        const name = m[1]
-        let type: string
-        let comboOptions: string[] | undefined
-
-        if (m[2].startsWith('[')) {
-          type = 'COMBO'
-          try {
-            const optStr = m[2].replace(/'/g, '"')
-            comboOptions = JSON.parse(optStr)
-          } catch {
-            comboOptions = []
-          }
-        } else {
-          type = m[2].replace(/"/g, '').toUpperCase()
-        }
-
-        if (!VALID_COMFY_TYPES_LOCAL.has(type)) continue
-
-        const isWidget = WIDGET_INPUT_TYPES_LOCAL.has(type)
-        const input: NodeInput = {
-          id: crypto.randomUUID(),
-          name,
-          type: type as any,
-          required,
-          forceInput: !isWidget,
-          tooltip: ''
-        }
-        if (type === 'COMBO' && comboOptions) {
-          input.widget = { comboOptions, default: comboOptions[0] }
-          input.forceInput = false
-        }
-        inputs.push(input)
-      }
-    }
-
-    if (requiredMatch) parseInputBlock(requiredMatch[1], true)
-    if (optionalMatch) parseInputBlock(optionalMatch[1], false)
-  }
-
-  // Extract RETURN_TYPES
-  const outputs: NodeOutput[] = []
-  const returnTypesMatch = code.match(/RETURN_TYPES\s*=\s*\(([\s\S]*?)\)/)
-  const returnNamesMatch = code.match(/RETURN_NAMES\s*=\s*\(([\s\S]*?)\)/)
-
-  if (returnTypesMatch) {
-    const types = returnTypesMatch[1].match(/"([^"]+)"/g)?.map((s) => s.replace(/"/g, '')) ?? []
-    const names = returnNamesMatch
-      ? returnNamesMatch[1].match(/"([^"]+)"/g)?.map((s) => s.replace(/"/g, '')) ?? []
-      : []
-
-    types.forEach((type, i) => {
-      const t = type.toUpperCase()
-      if (VALID_COMFY_TYPES_LOCAL.has(t)) {
-        outputs.push({
-          id: crypto.randomUUID(),
-          name: names[i] ?? `output_${i}`,
-          type: t as any,
-          tooltip: ''
-        })
-      }
-    })
-  }
-
-  // Extract function body
-  const funcName = node.functionName || 'execute'
-  const funcPattern = new RegExp(
-    `def\\s+${funcName}\\s*\\(self[^)]*\\)\\s*:\\s*\\n((?:        [^\\n]*\\n?|\\s*\\n)*)`,
-    'm'
-  )
-  const funcMatch = code.match(funcPattern)
-  let executeBody = node.executeBody
-
-  if (funcMatch) {
-    const rawBody = funcMatch[1]
-    executeBody = rawBody.replace(/\s+$/, '')
-    if (!executeBody.trim()) {
-      executeBody = '        pass'
-    }
-  }
-
-  if (inputs.length === 0 && outputs.length === 0 && executeBody === node.executeBody) {
-    return { error: 'Could not parse any changes from the code. The parser could not identify inputs, outputs, or function body modifications.' }
-  }
-
-  return { inputs: inputs.length > 0 ? inputs : node.inputs, outputs: outputs.length > 0 ? outputs : node.outputs, executeBody }
-}
 
 // ---------------------------------------------------------------------------
 // JSON extraction helper
@@ -264,19 +141,27 @@ You can modify this node by returning a JSON object with an "operations" array.
 
 Each operation must be one of:
 
-1. Add an input — "tooltip" is REQUIRED and must describe what the input does:
+INPUT/OUTPUT FIELD REFERENCE:
+  "name": Python parameter name (snake_case)
+  "type": ComfyUI type (see valid types below)
+  "required": true = must be connected; false = optional
+  "forceInput": true = always shown as a socket connection (even for widget types); false = shown as an inline control widget
+  "tooltip": REQUIRED — describe what the input/output does (shown on hover in ComfyUI)
+
+1. Add an input — "tooltip" is REQUIRED:
 {"op": "add_input", "name": "mask", "type": "MASK", "required": true, "forceInput": true, "tooltip": "Alpha mask to blend images — white areas are fully blended"}
 
-2. Update an existing input (by name) — include "tooltip" if changing what the input does:
-{"op": "update_input", "name": "image", "updates": {"required": false, "type": "LATENT", "tooltip": "Input latent tensor to process"}}
+2. Update an existing input (by name):
+{"op": "update_input", "name": "image", "updates": {"required": false, "forceInput": false, "type": "LATENT", "tooltip": "Input latent tensor to process"}}
+  You can update any combination of: required, forceInput, type, tooltip, widget
 
 3. Delete an input:
 {"op": "delete_input", "name": "old_param"}
 
-4. Add an output — "tooltip" is REQUIRED and must describe what the output contains:
+4. Add an output — "tooltip" is REQUIRED:
 {"op": "add_output", "name": "processed", "type": "IMAGE", "tooltip": "Processed image with mask applied"}
 
-5. Update an existing output (by name) — include "tooltip" if changing what the output is:
+5. Update an existing output (by name):
 {"op": "update_output", "name": "result", "updates": {"type": "LATENT", "tooltip": "Encoded latent representation"}}
 
 6. Delete an output:
@@ -285,16 +170,44 @@ Each operation must be one of:
 7. Set the function code (indented with 8 spaces):
 {"op": "set_code", "code": "        import torch\\n        result = image * 2\\n        return (result,)"}
 
-8. Update identity fields (displayName, internalName, category, description, functionName, usePackFolder):
+8. Update identity fields:
 {"op": "set_identity", "displayName": "Better Node Name", "category": "image/processing"}
+  Fields: displayName, internalName, category, description, functionName, usePackFolder
 
 9. Update advanced settings:
 {"op": "set_advanced", "isOutputNode": true, "isChangedMode": "always"}
-   Valid isChangedMode values: "none" (default caching), "always" (re-run every time), "hash" (re-run when inputs change)
+  isChangedMode values: "none" (default caching), "always" (re-run every time), "hash" (re-run when inputs change)
 
-For widget inputs (INT, FLOAT, STRING, BOOLEAN, COMBO with forceInput=false), you can include widget config:
-{"op": "add_input", "name": "strength", "type": "FLOAT", "required": true, "forceInput": false, "widget": {"min": 0.0, "max": 1.0, "step": 0.01, "default": 0.5}}
-{"op": "add_input", "name": "mode", "type": "COMBO", "required": true, "forceInput": false, "widget": {"comboOptions": ["bilinear", "nearest", "bicubic"], "default": "bilinear"}}
+WIDGET CONFIG — applies to INT, FLOAT, STRING, BOOLEAN, COMBO when forceInput=false.
+Always include a "widget" object with sensible defaults and ranges to improve user experience.
+Note: forceInput=true overrides widget — the input shows as a socket regardless of type.
+
+INT — inline number input with optional slider:
+{"op": "add_input", "name": "count", "type": "INT", "required": true, "forceInput": false, "tooltip": "Number of items to process",
+ "widget": {"default": 1, "min": 0, "max": 100, "step": 1}}
+
+FLOAT — inline float input with optional slider:
+{"op": "add_input", "name": "strength", "type": "FLOAT", "required": true, "forceInput": false, "tooltip": "Blend strength from 0 to 1",
+ "widget": {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01, "round": 0.01}}
+  round: decimal places for display (e.g. 0.01 = 2 decimal places)
+
+STRING — text input or multiline textarea:
+{"op": "add_input", "name": "prompt", "type": "STRING", "required": true, "forceInput": false, "tooltip": "Text prompt to process",
+ "widget": {"default": "", "multiline": true, "placeholder": "Enter your prompt here…"}}
+  multiline: true = textarea (use for long text/prompts), false = single-line input
+  placeholder: hint text shown when the field is empty
+  default: initial value pre-filled in the field
+
+BOOLEAN — toggle switch:
+{"op": "add_input", "name": "enabled", "type": "BOOLEAN", "required": true, "forceInput": false, "tooltip": "Enable or disable processing",
+ "widget": {"default": true}}
+
+COMBO — dropdown selector (comboOptions is REQUIRED):
+{"op": "add_input", "name": "mode", "type": "COMBO", "required": true, "forceInput": false, "tooltip": "Interpolation method to use",
+ "widget": {"comboOptions": ["bilinear", "nearest", "bicubic"], "default": "bilinear"}}
+
+To update widget config on an existing input, include it in the "updates" object:
+{"op": "update_input", "name": "prompt", "updates": {"widget": {"multiline": true, "placeholder": "New placeholder…", "default": "new default"}}}
 
 Valid types: IMAGE, LATENT, CONDITIONING, MODEL, VAE, CLIP, MASK, CONTROL_NET, STYLE_MODEL, CLIP_VISION, CLIP_VISION_OUTPUT, UPSCALE_MODEL, SAMPLER, SIGMAS, GUIDER, NOISE, GLIGEN, AUDIO, INT, FLOAT, STRING, BOOLEAN, COMBO, *
 
@@ -1365,15 +1278,15 @@ Re-read the original request and respond with corrected JSON now.`
       return
     }
     if (msg.mode === 'fullnode') {
-      const result = parseFullCodeResponse(msg.content, node)
-      if ('error' in result) {
+      const result = parseNodeCode(msg.content, node)
+      if (!result) {
         const setter = msg.mode === 'fullnode' ? setFullnodeMessages : setExecuteMessages
         setter((prev) => [
           ...prev,
           {
             id: generateId(),
             role: 'error',
-            content: `Apply failed: ${result.error}`,
+            content: 'Apply failed: could not parse inputs, outputs, or function body from the code.',
             timestamp: Date.now()
           }
         ])
