@@ -28,7 +28,7 @@ export interface LLMGenerateRequest {
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant' | 'error'
+  role: 'user' | 'assistant' | 'error' | 'correction' | 'rejection'
   content: string
   timestamp: number
   elapsedMs?: number

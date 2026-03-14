@@ -152,6 +152,13 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
               {showTopLine && (
                 <div className="absolute -top-0.5 left-0 right-0 h-0.5 bg-blue-400 rounded-full z-10 pointer-events-none" />
               )}
+              {/* Proposal badges — absolutely positioned so they don't affect row layout */}
+              {isUpdated && (
+                <span className="absolute top-0.5 right-1 z-10 text-[10px] font-bold text-yellow-300 bg-yellow-900/60 border border-yellow-700/50 rounded px-1.5 py-0.5 pointer-events-none">WILL CHANGE</span>
+              )}
+              {isDeleted && (
+                <span className="absolute top-0.5 right-1 z-10 text-[10px] font-bold text-red-300 bg-red-900/60 border border-red-700/50 rounded px-1.5 py-0.5 pointer-events-none">WILL DELETE</span>
+              )}
               <div
                 draggable
                 onDragStart={() => setDragging(idx)}
@@ -164,7 +171,7 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
                 onDrop={() => handleDrop(idx)}
                 onDragEnd={resetDrag}
                 onDragLeave={() => { if (dragOverIdx === idx) { setDragOverIdx(null); setDragOverHalf(null) } }}
-                onDoubleClick={() => setEditingInput(input)}
+                onDoubleClick={() => setEditingInput(displayInput)}
                 className={cn(
                   'group flex items-center gap-2 rounded-lg border bg-slate-800/40 px-2 py-2 transition-colors select-none cursor-pointer',
                   dragging === idx && 'opacity-40',
@@ -195,7 +202,7 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
                   </div>
                   <button
                     className="rounded p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-700 transition-colors"
-                    onClick={(e) => { e.stopPropagation(); setEditingInput(input) }}
+                    onClick={(e) => { e.stopPropagation(); setEditingInput(displayInput) }}
                     title="Edit input (or double-click row)"
                   >
                     <SquarePen className="h-3.5 w-3.5" />
@@ -207,14 +214,6 @@ export function InputsTab({ node }: InputsTabProps): JSX.Element {
 
                 {/* Index */}
                 <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center">{idx}</span>
-
-                {/* Proposal badges */}
-                {isUpdated && (
-                  <span className="shrink-0 text-[10px] font-bold text-yellow-300 bg-yellow-900/40 border border-yellow-700/50 rounded px-1.5 py-0.5">WILL CHANGE</span>
-                )}
-                {isDeleted && (
-                  <span className="shrink-0 text-[10px] font-bold text-red-300 bg-red-900/40 border border-red-700/50 rounded px-1.5 py-0.5">WILL DELETE</span>
-                )}
 
                 {/* Req/opt toggle */}
                 <Tooltip>

@@ -25,9 +25,11 @@ interface SettingsState {
   maxRecentProjects: number
   recentProjectsEnabled: boolean
   customModels: Partial<Record<LLMProvider, string[]>>
+  favoriteModels: Partial<Record<LLMProvider, string[]>>
   chatHistories: Record<string, { execute: ChatMessage[]; fullnode: ChatMessage[] }>
   contextMessageCount: number
   pendingProposal: { nodeId: string; messageId: string; operations: any[] } | null
+  lastRejectedProposal: { nodeId: string; messageId: string; operations: any[]; timestamp: number } | null
   exportPath: string
 
   setActiveProvider: (provider: LLMProvider) => void
@@ -49,10 +51,12 @@ interface SettingsState {
   setRecentProjectsEnabled: (enabled: boolean) => void
   addCustomModel: (provider: LLMProvider, model: string) => void
   removeCustomModel: (provider: LLMProvider, model: string) => void
+  toggleFavoriteModel: (provider: LLMProvider, model: string) => void
   setChatHistory: (nodeId: string, mode: 'execute' | 'fullnode', messages: ChatMessage[]) => void
   clearChatHistory: (nodeId: string) => void
   setContextMessageCount: (n: number) => void
   setPendingProposal: (proposal: { nodeId: string; messageId: string; operations: any[] } | null) => void
+  setLastRejectedProposal: (proposal: { nodeId: string; messageId: string; operations: any[]; timestamp: number } | null) => void
   setExportPath: (path: string) => void
   loadFromMain: () => Promise<void>
   persistToMain: () => Promise<void>
@@ -89,9 +93,11 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   maxRecentProjects: 10,
   recentProjectsEnabled: true,
   customModels: {},
+  favoriteModels: {},
   chatHistories: {},
   contextMessageCount: 10,
   pendingProposal: null,
+  lastRejectedProposal: null,
   exportPath: '',
 
   setActiveProvider: (provider) => {
@@ -233,6 +239,17 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     get().persistToMain()
   },
 
+  toggleFavoriteModel: (provider, model) => {
+    set((state) => {
+      const current = state.favoriteModels[provider] ?? []
+      const updated = current.includes(model)
+        ? current.filter((m) => m !== model)
+        : [...current, model]
+      return { favoriteModels: { ...state.favoriteModels, [provider]: updated } }
+    })
+    get().persistToMain()
+  },
+
   setChatHistory: (nodeId, mode, messages) => {
     set((state) => ({
       chatHistories: {
@@ -262,6 +279,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
 
   setPendingProposal: (proposal) => {
     set({ pendingProposal: proposal })
+  },
+
+  setLastRejectedProposal: (proposal) => {
+    set({ lastRejectedProposal: proposal })
   },
 
   setExportPath: (exportPath) => {
@@ -312,6 +333,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           if (saved.customModels && typeof saved.customModels === 'object') {
             update.customModels = saved.customModels as Partial<Record<LLMProvider, string[]>>
           }
+          if (saved.favoriteModels && typeof saved.favoriteModels === 'object') {
+            update.favoriteModels = saved.favoriteModels as Partial<Record<LLMProvider, string[]>>
+          }
           if (saved.chatHistories && typeof saved.chatHistories === 'object') {
             update.chatHistories = saved.chatHistories as Record<string, { execute: ChatMessage[]; fullnode: ChatMessage[] }>
           }
@@ -343,6 +367,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
           maxRecentProjects: state.maxRecentProjects,
           recentProjectsEnabled: state.recentProjectsEnabled,
           customModels: state.customModels,
+          favoriteModels: state.favoriteModels,
           chatHistories: state.chatHistories,
           contextMessageCount: state.contextMessageCount,
           exportPath: state.exportPath

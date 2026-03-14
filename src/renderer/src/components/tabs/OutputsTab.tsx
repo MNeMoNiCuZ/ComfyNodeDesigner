@@ -122,6 +122,12 @@ export function OutputsTab({ node }: OutputsTabProps): JSX.Element {
           const isUpdated = updateOp != null
           const updates = updateOp ? (updateOp.updates ?? updateOp) : null
           const displayType = isUpdated && updates?.type ? String(updates.type).toUpperCase() : output.type
+          const displayOutput: NodeOutput = isUpdated && updates ? {
+            ...output,
+            ...(updates.type ? { type: String(updates.type).toUpperCase() as any } : {}),
+            ...(typeof updates.tooltip === 'string' ? { tooltip: updates.tooltip } : {}),
+            ...(typeof updates.name === 'string' ? { name: updates.name } : {})
+          } : output
           const showTopLine = dragOverIdx === idx && dragOverHalf === 'top' && dragging !== idx
           const showBottomLine = dragOverIdx === idx && dragOverHalf === 'bottom' && dragging !== idx
 
@@ -142,7 +148,7 @@ export function OutputsTab({ node }: OutputsTabProps): JSX.Element {
                 onDrop={() => handleDrop(idx)}
                 onDragEnd={resetDrag}
                 onDragLeave={() => { if (dragOverIdx === idx) { setDragOverIdx(null); setDragOverHalf(null) } }}
-                onDoubleClick={() => setEditingOutput(output)}
+                onDoubleClick={() => setEditingOutput(displayOutput)}
                 className={cn(
                   'group flex items-center gap-2 rounded-lg border bg-slate-800/40 px-2 py-2 transition-colors select-none cursor-pointer',
                   dragging === idx && 'opacity-40',
@@ -173,7 +179,7 @@ export function OutputsTab({ node }: OutputsTabProps): JSX.Element {
                   </div>
                   <button
                     className="rounded p-1.5 text-slate-400 hover:text-blue-300 hover:bg-slate-700 transition-colors"
-                    onClick={(e) => { e.stopPropagation(); setEditingOutput(output) }}
+                    onClick={(e) => { e.stopPropagation(); setEditingOutput(displayOutput) }}
                     title="Edit output (or double-click row)"
                   >
                     <SquarePen className="h-3.5 w-3.5" />
@@ -186,12 +192,12 @@ export function OutputsTab({ node }: OutputsTabProps): JSX.Element {
                 {/* Index */}
                 <span className="text-xs text-slate-500 font-mono shrink-0 w-4 text-center">{idx}</span>
 
-                {/* Proposal badges */}
+                {/* Proposal badges — absolutely positioned so they don't affect row layout */}
                 {isUpdated && (
-                  <span className="shrink-0 text-[10px] font-bold text-yellow-300 bg-yellow-900/40 border border-yellow-700/50 rounded px-1.5 py-0.5">WILL CHANGE</span>
+                  <span className="absolute top-0.5 right-1 z-10 pointer-events-none text-[10px] font-bold text-yellow-300 bg-yellow-900/40 border border-yellow-700/50 rounded px-1.5 py-0.5">WILL CHANGE</span>
                 )}
                 {isDeleted && (
-                  <span className="shrink-0 text-[10px] font-bold text-red-300 bg-red-900/40 border border-red-700/50 rounded px-1.5 py-0.5">WILL DELETE</span>
+                  <span className="absolute top-0.5 right-1 z-10 pointer-events-none text-[10px] font-bold text-red-300 bg-red-900/40 border border-red-700/50 rounded px-1.5 py-0.5">WILL DELETE</span>
                 )}
 
                 {/* Type badge — fixed width so names align */}

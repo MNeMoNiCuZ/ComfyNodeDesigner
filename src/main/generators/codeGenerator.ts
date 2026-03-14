@@ -388,7 +388,7 @@ function generateInitPyIndividual(nodes: ComfyNodeDef[]): string {
 
   nodes.forEach((node, i) => {
     lines.push(
-      `from .${node.internalName} import NODE_CLASS_MAPPINGS as _m${i}, NODE_DISPLAY_NAME_MAPPINGS as _d${i}`
+      `from .nodes.${node.internalName} import NODE_CLASS_MAPPINGS as _m${i}, NODE_DISPLAY_NAME_MAPPINGS as _d${i}`
     )
   })
 

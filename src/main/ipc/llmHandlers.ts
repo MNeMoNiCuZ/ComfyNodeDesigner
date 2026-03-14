@@ -27,7 +27,7 @@ function getOpenAICompatibleAdapter(apiKey: string, baseURL?: string): LLMAdapte
           { role: 'system', content: system },
           { role: 'user', content: user }
         ],
-        max_tokens: 4096
+        max_tokens: 16384
       }, { signal: signal as any })
       return response.choices[0]?.message?.content ?? ''
     },
@@ -38,7 +38,7 @@ function getOpenAICompatibleAdapter(apiKey: string, baseURL?: string): LLMAdapte
           { role: 'system', content: system },
           ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
         ],
-        max_tokens: 4096
+        max_tokens: 16384
       }, { signal: signal as any })
       return response.choices[0]?.message?.content ?? ''
     },
@@ -63,7 +63,7 @@ function getAnthropicAdapter(apiKey: string): LLMAdapter {
     async generate(system, user, model, signal?) {
       const response = await client.messages.create({
         model,
-        max_tokens: 4096,
+        max_tokens: 16384,
         system,
         messages: [{ role: 'user', content: user }]
       }, { signal: signal as any })
@@ -73,7 +73,7 @@ function getAnthropicAdapter(apiKey: string): LLMAdapter {
     async generateChat(system, messages, model, signal?) {
       const response = await client.messages.create({
         model,
-        max_tokens: 4096,
+        max_tokens: 16384,
         system,
         messages: messages.map((m) => ({ role: m.role, content: m.content }))
       }, { signal: signal as any })
@@ -123,14 +123,14 @@ function getGoogleAdapter(apiKey: string): LLMAdapter {
 
   return {
     async generate(system, user, model, signal?) {
-      return googleCall(system, [{ role: 'user', parts: [{ text: user }] }], model, 4096, signal)
+      return googleCall(system, [{ role: 'user', parts: [{ text: user }] }], model, 16384, signal)
     },
     async generateChat(system, messages, model, signal?) {
       const contents = messages.map((m) => ({
         role: m.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: m.content }]
       }))
-      return googleCall(system, contents, model, 4096, signal)
+      return googleCall(system, contents, model, 16384, signal)
     },
     async testConnection(model) {
       try {
@@ -153,7 +153,7 @@ function getGroqAdapter(apiKey: string): LLMAdapter {
           { role: 'system', content: system },
           { role: 'user', content: user }
         ],
-        max_tokens: 4096
+        max_tokens: 16384
       }, { signal: signal as any })
       return response.choices[0]?.message?.content ?? ''
     },
@@ -164,7 +164,7 @@ function getGroqAdapter(apiKey: string): LLMAdapter {
           { role: 'system', content: system },
           ...messages.map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
         ],
-        max_tokens: 4096
+        max_tokens: 16384
       }, { signal: signal as any })
       return response.choices[0]?.message?.content ?? ''
     },
@@ -317,7 +317,20 @@ export async function handleFetchOllamaModels(baseUrl: string): Promise<string[]
   const response = await fetch(`${base}/api/tags`)
   if (!response.ok) throw new Error('Could not connect to Ollama')
   const data = (await response.json()) as { models?: Array<{ name: string }> }
-  return (data.models ?? []).map((m) => m.name)
+  return (data.models ?? []).map((m) => m.name).sort()
+}
+
+export interface OllamaRunningModel {
+  name: string
+  size_vram: number
+}
+
+export async function handleFetchOllamaPs(baseUrl: string): Promise<OllamaRunningModel[]> {
+  const base = (baseUrl ?? 'http://localhost:11434').replace(/\/$/, '')
+  const response = await fetch(`${base}/api/ps`)
+  if (!response.ok) return []
+  const data = (await response.json()) as { models?: Array<{ name: string; size_vram: number }> }
+  return (data.models ?? []).map((m) => ({ name: m.name, size_vram: m.size_vram ?? 0 }))
 }
 
 export async function handleFetchGroqModels(apiKey: string): Promise<string[]> {

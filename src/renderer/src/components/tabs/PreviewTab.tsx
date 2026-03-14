@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react'
-import Editor from '@monaco-editor/react'
+import React, { useMemo, useState, useEffect } from 'react'
+import Editor, { DiffEditor } from '@monaco-editor/react'
 import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
 import { generateAllFiles } from '../../../../main/generators/codeGenerator'
+import { applyOperations } from '../../lib/nodeOperations'
 import { Button } from '../ui/button'
-import { Copy, Check, Download, Loader2 } from 'lucide-react'
-import { ExportModal } from '../modals/ExportModal'
+import { Diff, Save, X, Lock } from 'lucide-react'
 import type { ComfyNodeDef } from '../../types/node.types'
 
 interface PreviewTabProps {
@@ -14,42 +14,119 @@ interface PreviewTabProps {
 
 type ViewMode = 'node_file' | 'init_py_individual' | 'nodes_py' | 'init_py'
 
+/**
+ * Extract the body of the execute function from a generated node file.
+ * Returns null if the function cannot be found.
+ */
+function extractExecuteBody(code: string, functionName: string): string | null {
+  const lines = code.split('\n')
+  let defIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (/^    def /.test(lines[i]) && lines[i].includes(`def ${functionName}(`)) {
+      defIdx = i
+      break
+    }
+  }
+  if (defIdx === -1) return null
+
+  const bodyLines: string[] = []
+  for (let i = defIdx + 1; i < lines.length; i++) {
+    const line = lines[i]
+    if (line === '' || line.trim() === '') {
+      bodyLines.push('')
+    } else if (/^        /.test(line)) {
+      bodyLines.push(line)
+    } else {
+      break
+    }
+  }
+
+  // Trim trailing blank lines
+  while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === '') {
+    bodyLines.pop()
+  }
+
+  if (bodyLines.length === 0) return null
+  return bodyLines.join('\n')
+}
+
 export function PreviewTab({ node }: PreviewTabProps = {}): JSX.Element {
-  const { project } = useProjectStore()
-  const { exportPath } = useSettingsStore()
+  const { project, updateNode } = useProjectStore()
+  const { pendingProposal } = useSettingsStore()
 
   const defaultMode: ViewMode = node ? 'node_file' : 'nodes_py'
   const [mode, setMode] = useState<ViewMode>(defaultMode)
-  const [copied, setCopied] = useState(false)
-  const [exportOpen, setExportOpen] = useState(false)
-  const [exporting, setExporting] = useState(false)
-  const [exportDone, setExportDone] = useState(false)
+  const [editedCode, setEditedCode] = useState<string | null>(null)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const sanitizedName = (project.packName ?? project.name).replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase()
 
+  // Substitute proposed node when a pending proposal exists
+  const previewNodes = useMemo(() => {
+    if (!pendingProposal) return project.nodes
+    const idx = project.nodes.findIndex((n) => n.id === pendingProposal.nodeId)
+    if (idx === -1) return project.nodes
+    const target = project.nodes[idx]
+    const validOps = (pendingProposal.operations ?? []).filter((op: any) => !op._invalid)
+    if (validOps.length === 0) return project.nodes
+    const result = applyOperations(target, validOps)
+    if ('error' in result) return project.nodes
+    const updated = [...project.nodes]
+    updated[idx] = { ...target, ...result.updates }
+    return updated
+  }, [project.nodes, pendingProposal])
+
   // Always generate all project files so initPyIndividual has all nodes
   const files = useMemo(
+    () => generateAllFiles(previewNodes, project.packName ?? project.name),
+    [previewNodes, project.packName, project.name]
+  )
+
+  // Original files (current committed state, no proposal applied)
+  const originalFiles = useMemo(
     () => generateAllFiles(project.nodes, project.packName ?? project.name),
     [project.nodes, project.packName, project.name]
   )
 
-  const code: string = (() => {
+  // Use the proposed node's internalName if there's a pending proposal for the current node
+  const displayNode = node && pendingProposal?.nodeId === node.id
+    ? (previewNodes.find((n) => n.id === node.id) ?? node)
+    : node
+
+  const hasPendingForThisNode = !!(pendingProposal && (!node || pendingProposal.nodeId === node.id))
+
+  // Editable only in node_file mode with no pending proposal
+  const isEditable = mode === 'node_file' && !hasPendingForThisNode && !!node
+
+  // Reset edits when switching mode or node
+  useEffect(() => {
+    setEditedCode(null)
+    setSaveError(null)
+  }, [mode, node?.id])
+
+  function getCode(f: ReturnType<typeof generateAllFiles>): string {
     switch (mode) {
       case 'node_file':
-        return node ? (files.nodeFiles[node.internalName] ?? '# Node file not found\n') : files.nodeFiles[Object.keys(files.nodeFiles)[0]] ?? '# No nodes\n'
+        return displayNode ? (f.nodeFiles[displayNode.internalName] ?? '# Node file not found\n') : f.nodeFiles[Object.keys(f.nodeFiles)[0]] ?? '# No nodes\n'
       case 'init_py_individual':
-        return files.initPyIndividual
+        return f.initPyIndividual
       case 'nodes_py':
-        return files.nodesPy
+        return f.nodesPy
       case 'init_py':
-        return files.initPy
+        return f.initPy
     }
-  })()
+  }
+
+  const code = getCode(files)
+  const originalCode = getCode(originalFiles)
+  const showDiff = hasPendingForThisNode && originalCode !== code
+
+  const isDirty = editedCode !== null && editedCode !== code
 
   const fileLabel: string = (() => {
     switch (mode) {
       case 'node_file':
-        return node ? `${node.internalName}.py` : `${sanitizedName}.py`
+        return displayNode ? `${displayNode.internalName}.py` : `${sanitizedName}.py`
       case 'init_py_individual':
         return `${sanitizedName}/__init__.py`
       case 'nodes_py':
@@ -59,25 +136,21 @@ export function PreviewTab({ node }: PreviewTabProps = {}): JSX.Element {
     }
   })()
 
-  function handleCopy(): void {
-    navigator.clipboard.writeText(code)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  function handleSaveEdit(): void {
+    if (!editedCode || !node || !displayNode) return
+    setSaveError(null)
+    const body = extractExecuteBody(editedCode, displayNode.functionName)
+    if (body === null) {
+      setSaveError(`Could not locate def ${displayNode.functionName}() in edited code`)
+      return
+    }
+    updateNode(node.id, { executeBody: body })
+    setEditedCode(null)
   }
 
-  async function handleDirectExport(): Promise<void> {
-    if (!exportPath || project.nodes.length === 0) return
-    setExporting(true)
-    try {
-      await window.electronAPI.exportToPath(project.nodes, project.packName ?? project.name, exportPath)
-      setExportDone(true)
-      setTimeout(() => setExportDone(false), 2000)
-    } catch {
-      // Fall back to modal on error
-      setExportOpen(true)
-    } finally {
-      setExporting(false)
-    }
+  function handleDiscardEdit(): void {
+    setEditedCode(null)
+    setSaveError(null)
   }
 
   // Toolbar buttons depend on whether a node is provided
@@ -113,78 +186,95 @@ export function PreviewTab({ node }: PreviewTabProps = {}): JSX.Element {
 
         <span className="text-xs text-slate-500 font-mono truncate">{fileLabel}</span>
 
+        {showDiff && (
+          <span className="flex items-center gap-1 text-[10px] text-amber-400 bg-amber-900/30 border border-amber-700/40 px-2 py-0.5 rounded">
+            <Diff className="h-3 w-3" />
+            Proposal diff
+          </span>
+        )}
+
+        {hasPendingForThisNode && !showDiff && (
+          <span className="flex items-center gap-1 text-[10px] text-slate-500 bg-slate-800/60 border border-slate-700/40 px-2 py-0.5 rounded">
+            <Lock className="h-3 w-3" />
+            Locked — accept or reject proposal to edit
+          </span>
+        )}
+
+        {saveError && (
+          <span className="text-[10px] text-red-400 truncate max-w-xs">{saveError}</span>
+        )}
+
         <div className="flex-1" />
 
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-muted-foreground">
-            {project.nodes.length} node{project.nodes.length !== 1 ? 's' : ''}
-          </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 gap-1.5 text-xs"
-            onClick={handleCopy}
-          >
-            {copied ? (
-              <><Check className="h-3.5 w-3.5 text-green-400" /> Copied</>
-            ) : (
-              <><Copy className="h-3.5 w-3.5" /> Copy</>
-            )}
-          </Button>
-          {exportPath ? (
+        {isDirty && (
+          <div className="flex items-center gap-1">
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              className="h-7 gap-1.5 text-xs border-slate-700"
-              onClick={handleDirectExport}
-              disabled={exporting || project.nodes.length === 0}
-              title={`Export to ${exportPath}`}
+              className="h-7 gap-1.5 text-xs text-slate-400 hover:text-slate-200"
+              onClick={handleDiscardEdit}
             >
-              {exporting ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : exportDone ? (
-                <Check className="h-3.5 w-3.5 text-green-400" />
-              ) : (
-                <Download className="h-3.5 w-3.5" />
-              )}
-              {exportDone ? 'Exported!' : 'Export'}
+              <X className="h-3.5 w-3.5" />
+              Discard
             </Button>
-          ) : (
             <Button
-              variant="outline"
               size="sm"
-              className="h-7 gap-1.5 text-xs border-slate-700"
-              onClick={() => setExportOpen(true)}
+              className="h-7 gap-1.5 text-xs"
+              onClick={handleSaveEdit}
             >
-              <Download className="h-3.5 w-3.5" />
-              Export
+              <Save className="h-3.5 w-3.5" />
+              Save
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      {/* Editor */}
+      {/* Editor / Diff Editor */}
       <div className="flex-1 overflow-hidden">
-        <Editor
-          height="100%"
-          language="python"
-          theme="vs-dark"
-          value={code}
-          options={{
-            readOnly: true,
-            minimap: { enabled: true },
-            fontSize: 13,
-            lineNumbers: 'on',
-            wordWrap: 'off',
-            scrollBeyondLastLine: false,
-            tabSize: 4,
-            fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
-            renderLineHighlight: 'none'
-          }}
-        />
+        {showDiff ? (
+          <DiffEditor
+            height="100%"
+            language="python"
+            theme="vs-dark"
+            original={originalCode}
+            modified={code}
+            options={{
+              readOnly: true,
+              renderSideBySide: true,
+              minimap: { enabled: true },
+              fontSize: 13,
+              lineNumbers: 'on',
+              wordWrap: 'off',
+              scrollBeyondLastLine: false,
+              tabSize: 4,
+              fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+              renderLineHighlight: 'none',
+              renderOverviewRuler: false
+            }}
+          />
+        ) : (
+          <Editor
+            height="100%"
+            language="python"
+            theme="vs-dark"
+            value={editedCode ?? code}
+            onChange={(val) => {
+              if (isEditable) setEditedCode(val ?? '')
+            }}
+            options={{
+              readOnly: !isEditable,
+              minimap: { enabled: true },
+              fontSize: 13,
+              lineNumbers: 'on',
+              wordWrap: 'off',
+              scrollBeyondLastLine: false,
+              tabSize: 4,
+              fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+              renderLineHighlight: isEditable ? 'line' : 'none'
+            }}
+          />
+        )}
       </div>
-
-      <ExportModal open={exportOpen} onClose={() => setExportOpen(false)} />
     </div>
   )
 }

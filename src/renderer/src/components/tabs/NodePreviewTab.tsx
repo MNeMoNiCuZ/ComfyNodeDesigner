@@ -1,7 +1,8 @@
-import React, { createContext, useContext } from 'react'
+import React, { createContext, useContext, useMemo } from 'react'
 import type { ComfyNodeDef, NodeInput, NodeOutput, ComfyType } from '../../types/node.types'
 import { getTypeInfo, getTypeHex } from '../../lib/comfyTypes'
 import { useSettingsStore } from '../../store/settingsStore'
+import { applyOperations } from '../../lib/nodeOperations'
 import {
   Tooltip,
   TooltipContent,
@@ -170,10 +171,16 @@ function MockToggle({ value }: { value?: boolean }): JSX.Element {
 
 function MockCombo({ options }: { options: string[] }): JSX.Element {
   return (
-    <div className="flex-1 bg-slate-700/60 border border-slate-600 rounded px-2 py-0.5 flex items-center justify-between">
-      <span className="text-xs text-slate-300 truncate">{options[0] ?? 'Select…'}</span>
-      <span className="text-slate-500 text-xs ml-1">▾</span>
-    </div>
+    <select
+      className="flex-1 bg-slate-700/60 border border-slate-600 rounded px-2 py-0.5 text-xs text-slate-300 cursor-pointer select-text"
+      defaultValue={options[0] ?? ''}
+    >
+      {options.length > 0 ? (
+        options.map((o) => <option key={o} value={o}>{o}</option>)
+      ) : (
+        <option value="">Select…</option>
+      )}
+    </select>
   )
 }
 
@@ -225,9 +232,19 @@ function OutputRow({ output }: OutputRowProps): JSX.Element {
 }
 
 export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
-  const { typeColorOverrides } = useSettingsStore()
-  const socketInputs = node.inputs.filter((i) => !isWidget(i))
-  const widgetInputs = node.inputs.filter((i) => isWidget(i))
+  const { typeColorOverrides, pendingProposal } = useSettingsStore()
+
+  const displayNode = useMemo(() => {
+    if (pendingProposal?.nodeId !== node.id) return node
+    const validOps = (pendingProposal.operations ?? []).filter((op: any) => !op._invalid)
+    if (validOps.length === 0) return node
+    const result = applyOperations(node, validOps)
+    if ('error' in result) return node
+    return { ...node, ...result.updates }
+  }, [node, pendingProposal])
+
+  const socketInputs = displayNode.inputs.filter((i) => !isWidget(i))
+  const widgetInputs = displayNode.inputs.filter((i) => isWidget(i))
 
   return (
     <ColorOverridesContext.Provider value={typeColorOverrides}>
@@ -254,19 +271,19 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
           >
             <div className="flex-1 min-w-0">
               <div className="text-sm font-semibold text-slate-100 truncate">
-                {node.displayName || node.internalName}
+                {displayNode.displayName || displayNode.internalName}
               </div>
               <div className="text-[10px] text-slate-500 mt-0.5 font-mono">
-                {node.category}
+                {displayNode.category}
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0">
-              {node.isOutputNode && (
+              {displayNode.isOutputNode && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-900/60 text-amber-400 border border-amber-700/50 font-medium">
                   OUTPUT
                 </span>
               )}
-              {node.isInputNode && (
+              {displayNode.isInputNode && (
                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-green-900/60 text-green-400 border border-green-700/50 font-medium">
                   INPUT
                 </span>
@@ -277,17 +294,17 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
           {/* Node body */}
           <div style={{ background: '#1e1e30' }}>
             {/* Description */}
-            {node.description && (
+            {displayNode.description && (
               <div
                 className="px-3 py-1.5 text-[10px] text-slate-500 italic"
                 style={{ borderBottom: '1px solid #2a2a40' }}
               >
-                {node.description}
+                {displayNode.description}
               </div>
             )}
 
             {/* Socket connections — left inputs, right outputs side by side */}
-            {(socketInputs.length > 0 || node.outputs.length > 0) && (
+            {(socketInputs.length > 0 || displayNode.outputs.length > 0) && (
               <div className="flex">
                 {/* Left: socket inputs */}
                 <div className="flex-1 py-1 pr-2 pl-3">
@@ -295,23 +312,23 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
                     <SocketInputRow key={input.id} input={input} />
                   ))}
                   {/* Pad to match output row count */}
-                  {Array.from({ length: Math.max(0, node.outputs.length - socketInputs.length) }).map((_, i) => (
+                  {Array.from({ length: Math.max(0, displayNode.outputs.length - socketInputs.length) }).map((_, i) => (
                     <div key={`pad-${i}`} className="py-1 h-6" />
                   ))}
                 </div>
 
                 {/* Divider */}
-                {socketInputs.length > 0 && node.outputs.length > 0 && (
+                {socketInputs.length > 0 && displayNode.outputs.length > 0 && (
                   <div style={{ width: 1, background: '#2d2d4a' }} />
                 )}
 
                 {/* Right: outputs */}
                 <div className="flex-1 py-1 pl-2 pr-3">
-                  {node.outputs.map((output) => (
+                  {displayNode.outputs.map((output) => (
                     <OutputRow key={output.id} output={output} />
                   ))}
                   {/* Pad to match input row count */}
-                  {Array.from({ length: Math.max(0, socketInputs.length - node.outputs.length) }).map((_, i) => (
+                  {Array.from({ length: Math.max(0, socketInputs.length - displayNode.outputs.length) }).map((_, i) => (
                     <div key={`pad-${i}`} className="py-1 h-6" />
                   ))}
                 </div>
@@ -320,7 +337,7 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
 
             {/* Widget inputs */}
             {widgetInputs.length > 0 && (
-              <div style={{ borderTop: (socketInputs.length > 0 || node.outputs.length > 0) ? '1px solid #2a2a40' : undefined }}>
+              <div style={{ borderTop: (socketInputs.length > 0 || displayNode.outputs.length > 0) ? '1px solid #2a2a40' : undefined }}>
                 {widgetInputs.map((input) => (
                   <div
                     key={input.id}
@@ -333,7 +350,7 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
             )}
 
             {/* Empty state */}
-            {node.inputs.length === 0 && node.outputs.length === 0 && (
+            {displayNode.inputs.length === 0 && displayNode.outputs.length === 0 && (
               <div className="py-6 text-center text-xs text-slate-600">
                 No inputs or outputs defined
               </div>
@@ -350,12 +367,12 @@ export function NodePreviewTab({ node }: NodePreviewTabProps): JSX.Element {
             <span className="text-slate-400">{widgetInputs.length}</span> widget{widgetInputs.length !== 1 ? 's' : ''}
           </span>
           <span>
-            <span className="text-slate-400">{node.outputs.length}</span> output{node.outputs.length !== 1 ? 's' : ''}
+            <span className="text-slate-400">{displayNode.outputs.length}</span> output{displayNode.outputs.length !== 1 ? 's' : ''}
           </span>
         </div>
 
         {/* Type legend for types in use */}
-        <TypeLegend node={node} />
+        <TypeLegend node={displayNode} />
       </div>
     </ColorOverridesContext.Provider>
   )

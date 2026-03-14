@@ -17,6 +17,7 @@ declare global {
       abortLLM: (requestId: string) => Promise<void>
       testConnection: (provider: LLMProvider, model: string, baseUrl?: string) => Promise<boolean>
       fetchOllamaModels: (baseUrl: string) => Promise<string[]>
+      fetchOllamaPs: (baseUrl: string) => Promise<Array<{ name: string; size_vram: number }>>
       fetchGroqModels: () => Promise<string[]>
 
       saveApiKey: (provider: LLMProvider, key: string) => Promise<void>

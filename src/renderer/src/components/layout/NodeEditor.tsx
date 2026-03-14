@@ -73,7 +73,7 @@ const NODE_TABS = [
 export function NodeEditor(): JSX.Element {
   const { addNode, packSelected, updateNode, pushLLMSnapshot } = useProjectStore()
   const selectedNode = useSelectedNode()
-  const { activeEditorTab, setActiveEditorTab, llmGenerating, pendingProposal, setPendingProposal } = useSettingsStore()
+  const { activeEditorTab, setActiveEditorTab, llmGenerating, pendingProposal, setPendingProposal, setLastRejectedProposal } = useSettingsStore()
 
   function handleAcceptProposal(node: ComfyNodeDef): void {
     if (!pendingProposal || pendingProposal.nodeId !== node.id) return
@@ -91,6 +91,9 @@ export function NodeEditor(): JSX.Element {
   }
 
   function handleRejectProposal(): void {
+    if (pendingProposal) {
+      setLastRejectedProposal({ ...pendingProposal, timestamp: Date.now() })
+    }
     setPendingProposal(null)
   }
 

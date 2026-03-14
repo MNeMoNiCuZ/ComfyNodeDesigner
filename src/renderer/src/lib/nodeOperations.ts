@@ -77,7 +77,7 @@ export function applyOperations(
           required: op.required !== false,
           forceInput,
           widget,
-          tooltip: ''
+          tooltip: typeof op.tooltip === 'string' ? op.tooltip : ''
         })
         changes.push(`+input "${op.name}"`)
         break
@@ -101,6 +101,7 @@ export function applyOperations(
         }
         if (updates.required !== undefined) inputs[idx].required = Boolean(updates.required)
         if (updates.forceInput !== undefined) inputs[idx].forceInput = Boolean(updates.forceInput)
+        if (typeof updates.tooltip === 'string') inputs[idx].tooltip = updates.tooltip
         if (updates.widget !== undefined) {
           if (updates.widget && typeof updates.widget === 'object') {
             const w: NodeInput['widget'] = {}
@@ -156,7 +157,7 @@ export function applyOperations(
           id: crypto.randomUUID(),
           name: op.name,
           type: type as ComfyType,
-          tooltip: ''
+          tooltip: typeof op.tooltip === 'string' ? op.tooltip : ''
         })
         changes.push(`+output "${op.name}"`)
         break
@@ -181,6 +182,7 @@ export function applyOperations(
         if (updates.name && typeof updates.name === 'string') {
           outputs[idx].name = updates.name
         }
+        if (typeof updates.tooltip === 'string') outputs[idx].tooltip = updates.tooltip
         changes.push(`~output "${op.name}"`)
         break
       }
@@ -274,6 +276,7 @@ export function diffOperationsAgainstNode(node: ComfyNodeDef, operations: any[])
         if (updates.required !== undefined && Boolean(updates.required) !== Boolean(existing.required)) return true
         if (updates.forceInput !== undefined && Boolean(updates.forceInput) !== Boolean(existing.forceInput)) return true
         if (updates.widget !== undefined) return true
+        if (updates.tooltip !== undefined && updates.tooltip !== (existing.tooltip ?? '')) return true
         return false
       }
       case 'update_output': {
@@ -282,6 +285,7 @@ export function diffOperationsAgainstNode(node: ComfyNodeDef, operations: any[])
         const updates = op.updates ?? op
         if (updates.type !== undefined && String(updates.type).toUpperCase() !== existing.type) return true
         if (updates.name !== undefined && updates.name !== existing.name) return true
+        if (updates.tooltip !== undefined && updates.tooltip !== (existing.tooltip ?? '')) return true
         return false
       }
       case 'set_code': {

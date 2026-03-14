@@ -14,7 +14,7 @@ import {
   handleImportNodeFolder,
   handleImportNodeFile
 } from './ipc/fileHandlers'
-import { handleGenerateLLM, handleGenerateLLMChat, handleTestConnection, handleFetchOllamaModels, handleFetchGroqModels, abortRequest } from './ipc/llmHandlers'
+import { handleGenerateLLM, handleGenerateLLMChat, handleTestConnection, handleFetchOllamaModels, handleFetchOllamaPs, handleFetchGroqModels, abortRequest } from './ipc/llmHandlers'
 import type { LLMProvider } from '../renderer/src/types/llm.types'
 
 function createWindow(): BrowserWindow {
@@ -106,6 +106,10 @@ app.whenReady().then(() => {
 
   ipcMain.handle('llm:fetch-ollama-models', (_, baseUrl) =>
     handleFetchOllamaModels(baseUrl)
+  )
+
+  ipcMain.handle('llm:fetch-ollama-ps', (_, baseUrl) =>
+    handleFetchOllamaPs(baseUrl)
   )
 
   ipcMain.handle('llm:fetch-groq-models', async (_, apiKey) => {

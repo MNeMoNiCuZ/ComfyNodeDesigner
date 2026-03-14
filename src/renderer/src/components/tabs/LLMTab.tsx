@@ -5,7 +5,7 @@ import { useProjectStore } from '../../store/projectStore'
 import { useSettingsStore } from '../../store/settingsStore'
 import { Button } from '../ui/button'
 import { Textarea } from '../ui/textarea'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from '../ui/select'
 import { buildLLMSystemPrompt, generateAllFiles } from '../../../../main/generators/codeGenerator'
 import { PROVIDER_LABELS, DEFAULT_MODELS } from '../../types/llm.types'
 import {
@@ -188,15 +188,29 @@ function parseFullCodeResponse(
 
 function extractJsonObject(text: string): string | null {
   // Try json code block first
-  const jsonBlock = text.match(/```(?:json)?\s*\n([\s\S]*?)```/)
-  if (jsonBlock) return jsonBlock[1].trim()
+  const jsonBlock = text.match(/```(?:json)?\s*\n?([\s\S]*?)```/)
+  let raw = jsonBlock ? jsonBlock[1].trim() : null
 
-  // Find outermost {} block
-  const start = text.indexOf('{')
-  const end = text.lastIndexOf('}')
-  if (start !== -1 && end > start) return text.slice(start, end + 1)
+  if (!raw) {
+    // Find outermost {} block
+    const start = text.indexOf('{')
+    const end = text.lastIndexOf('}')
+    if (start !== -1 && end > start) raw = text.slice(start, end + 1)
+  }
 
-  return null
+  if (!raw) return null
+
+  // Normalize: if model returned a single op {op:...} instead of {operations:[...]}, wrap it
+  try {
+    const parsed = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object' && typeof parsed.op === 'string' && !parsed.operations) {
+      return JSON.stringify({ operations: [parsed] })
+    }
+  } catch {
+    // fall through and return raw — let caller handle parse error
+  }
+
+  return raw
 }
 
 // ---------------------------------------------------------------------------
@@ -250,20 +264,20 @@ You can modify this node by returning a JSON object with an "operations" array.
 
 Each operation must be one of:
 
-1. Add an input:
-{"op": "add_input", "name": "mask", "type": "MASK", "required": true, "forceInput": true}
+1. Add an input — "tooltip" is REQUIRED and must describe what the input does:
+{"op": "add_input", "name": "mask", "type": "MASK", "required": true, "forceInput": true, "tooltip": "Alpha mask to blend images — white areas are fully blended"}
 
-2. Update an existing input (by name):
-{"op": "update_input", "name": "image", "updates": {"required": false, "type": "LATENT"}}
+2. Update an existing input (by name) — include "tooltip" if changing what the input does:
+{"op": "update_input", "name": "image", "updates": {"required": false, "type": "LATENT", "tooltip": "Input latent tensor to process"}}
 
 3. Delete an input:
 {"op": "delete_input", "name": "old_param"}
 
-4. Add an output:
-{"op": "add_output", "name": "processed", "type": "IMAGE"}
+4. Add an output — "tooltip" is REQUIRED and must describe what the output contains:
+{"op": "add_output", "name": "processed", "type": "IMAGE", "tooltip": "Processed image with mask applied"}
 
-5. Update an existing output (by name):
-{"op": "update_output", "name": "result", "updates": {"type": "LATENT"}}
+5. Update an existing output (by name) — include "tooltip" if changing what the output is:
+{"op": "update_output", "name": "result", "updates": {"type": "LATENT", "tooltip": "Encoded latent representation"}}
 
 6. Delete an output:
 {"op": "delete_output", "name": "unused_output"}
@@ -839,7 +853,10 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     clearChatHistory,
     contextMessageCount,
     pendingProposal,
-    setPendingProposal
+    setPendingProposal,
+    lastRejectedProposal,
+    setLastRejectedProposal,
+    favoriteModels
   } = useSettingsStore()
 
   const [editMode, setEditMode] = useState<EditMode>('execute')
@@ -850,6 +867,8 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
   const [appliedMessageIds, setAppliedMessageIds] = useState<Set<string>>(new Set())
   const [systemPromptOpen, setSystemPromptOpen] = useState(false)
+  const [ollamaRunning, setOllamaRunning] = useState<Array<{ name: string; size_vram: number }>>([])
+  const ollamaPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   // Derived — no session state needed; the last assistant msg per mode is always "latest"
   const latestExecuteId = useMemo(() => {
     const a = executeMessages.filter(m => m.role === 'assistant')
@@ -892,9 +911,79 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     }
   }, [llm.activeProvider, ollamaFetched, fetchOllamaModels])
 
+  // Poll Ollama /api/ps for VRAM usage when Ollama is the active provider
+  useEffect(() => {
+    if (llm.activeProvider !== 'ollama') {
+      setOllamaRunning([])
+      return
+    }
+    const baseUrl = activeConfig.baseUrl ?? 'http://localhost:11434'
+    async function poll(): Promise<void> {
+      try {
+        const running = await window.electronAPI.fetchOllamaPs(baseUrl)
+        setOllamaRunning(running)
+      } catch {
+        setOllamaRunning([])
+      }
+    }
+    poll()
+    ollamaPollRef.current = setInterval(poll, 5000)
+    return () => {
+      if (ollamaPollRef.current) clearInterval(ollamaPollRef.current)
+    }
+  }, [llm.activeProvider, activeConfig.baseUrl])
+
   const baseModelList =
     llm.activeProvider === 'ollama' ? ollamaModels : DEFAULT_MODELS[llm.activeProvider]
   const modelList = [...new Set([...baseModelList, ...(customModels[llm.activeProvider] ?? [])])]
+
+  // Consume rejection events from NodeEditor and add to chat log
+  useEffect(() => {
+    if (!lastRejectedProposal || lastRejectedProposal.nodeId !== node.id) return
+    const { messageId, operations, timestamp } = lastRejectedProposal
+    const validOps = operations.filter((op: any) => !op._invalid)
+    const lines = validOps.map((op: any) => {
+      switch (op.op) {
+        case 'add_input': return `• add_input: "${op.name}" (${op.type})`
+        case 'update_input': return `• update_input: "${op.name}" → ${JSON.stringify(op.updates ?? {})}`
+        case 'delete_input': return `• delete_input: "${op.name}"`
+        case 'add_output': return `• add_output: "${op.name}" (${op.type})`
+        case 'update_output': return `• update_output: "${op.name}" → ${JSON.stringify(op.updates ?? {})}`
+        case 'delete_output': return `• delete_output: "${op.name}"`
+        case 'set_code': return `• set_code: (new execute() body provided)`
+        case 'set_identity': return `• set_identity: ${JSON.stringify(op)}`
+        case 'set_advanced': return `• set_advanced: ${JSON.stringify(op)}`
+        default: return `• ${op.op}`
+      }
+    })
+    const content = validOps.length === 0
+      ? `[USER REJECTED PROPOSAL]\nThe user rejected the proposal (no valid changes were pending).`
+      : `[USER REJECTED PROPOSAL]\nThe user rejected the following ${validOps.length} proposed change(s):\n${lines.join('\n')}\n\nDo not repeat these exact changes unless explicitly asked.`
+    const rejectionMsg: ChatMessage = {
+      id: `rejection-${timestamp}`,
+      role: 'rejection',
+      content,
+      timestamp,
+      mode: 'execute'
+    }
+    // Add to whichever mode contains the originating message (default: execute)
+    const inFullnode = fullnodeMessages.some((m) => m.id === messageId)
+    if (inFullnode) {
+      const msg = { ...rejectionMsg, mode: 'fullnode' as const }
+      setFullnodeMessages((prev) => {
+        const updated = [...prev, msg]
+        setChatHistory(node.id, 'fullnode', updated)
+        return updated
+      })
+    } else {
+      setExecuteMessages((prev) => {
+        const updated = [...prev, rejectionMsg]
+        setChatHistory(node.id, 'execute', updated)
+        return updated
+      })
+    }
+    setLastRejectedProposal(null)
+  }, [lastRejectedProposal]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -920,8 +1009,19 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     }
   }, [generating])
 
+  // Build system prompt against the effective node state — if a proposal is pending,
+  // apply its ops so the LLM sees what's already been proposed, not just committed state.
+  const effectiveNodeForPrompt = useMemo(() => {
+    if (!pendingProposal || pendingProposal.nodeId !== node.id) return node
+    const validOps = (pendingProposal.operations ?? []).filter((op: any) => !op._invalid)
+    if (validOps.length === 0) return node
+    const result = applyOperations(node, validOps)
+    if ('error' in result) return node
+    return { ...node, ...result.updates }
+  }, [node, pendingProposal])
+
   const baseSystemPrompt =
-    editMode === 'execute' ? buildFunctionalityEditPrompt(node) : buildFullCodePrompt(node)
+    editMode === 'execute' ? buildFunctionalityEditPrompt(effectiveNodeForPrompt) : buildFullCodePrompt(effectiveNodeForPrompt)
 
   const effectiveInstructions = getEffectiveInstructions(
     llm.activeProvider,
@@ -982,11 +1082,11 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
     requestIdRef.current = reqId
 
     // Build multi-turn messages for the API with context limit
-    const allMessages = [...messages.filter((m) => m.role !== 'error'), userMsg]
+    const allMessages = [...messages.filter((m) => m.role !== 'error' && m.role !== 'correction'), userMsg]
     const limit = Math.max(1, contextMessageCount)
     const contextMessages = contextMessageCount === 0 ? [userMsg] : allMessages.slice(-limit)
     const apiMessages = contextMessages.map((m) => ({
-      role: m.role as 'user' | 'assistant',
+      role: (m.role === 'rejection' ? 'user' : m.role) as 'user' | 'assistant',
       content: m.content
     }))
 
@@ -1005,6 +1105,7 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
       // Determine response status for execute mode; diff + auto-preview
       let responseStatus: ChatMessage['responseStatus'] = 'ok'
       let autoPreviewOps: any[] | null = null
+      let taggedOps: any[] | null = null
       if (currentMode === 'execute') {
         const jsonStr = extractJsonObject(result)
         if (!jsonStr) {
@@ -1013,9 +1114,9 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
           try {
             const parsed = JSON.parse(jsonStr)
             if (Array.isArray(parsed.operations)) {
-              // Diff first — remove ops already reflected in node
               const diffed = diffOperationsAgainstNode(node, parsed.operations)
               const tagged = validateAndTagOperations(node, diffed)
+              taggedOps = tagged
               const validOps = tagged.filter((op: any) => !op._invalid)
               if (tagged.length === 0 || validOps.length === 0) {
                 responseStatus = 'all_invalid'
@@ -1045,24 +1146,167 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
         model: activeConfig.model
       }
 
-      // Auto-activate preview for valid execute responses
       if (autoPreviewOps) {
         setPendingProposal({ nodeId: currentNodeId, messageId: assistantMsgId, operations: autoPreviewOps })
       }
 
+      // Helper: parse + validate a retry result, return status + ops
+      function parseRetryResult(raw: string): { status: ChatMessage['responseStatus']; ops: any[] | null } {
+        const jsonStr = extractJsonObject(raw)
+        if (!jsonStr) return { status: 'parse_failed', ops: null }
+        try {
+          const parsed = JSON.parse(jsonStr)
+          if (!Array.isArray(parsed.operations)) return { status: 'parse_failed', ops: null }
+          const diffed = diffOperationsAgainstNode(node, parsed.operations)
+          const tagged = validateAndTagOperations(node, diffed)
+          const validOps = tagged.filter((op: any) => !op._invalid)
+          if (tagged.length === 0 || validOps.length === 0) return { status: 'all_invalid', ops: null }
+          return { status: 'ok', ops: tagged }
+        } catch {
+          return { status: 'parse_failed', ops: null }
+        }
+      }
 
-      if (currentMode === 'execute') {
+      // Helper: fire one auto-retry with a correction message
+      async function fireAutoRetry(correctionText: string): Promise<void> {
+        const correctionMsg: ChatMessage = {
+          id: generateId(),
+          role: 'correction',
+          content: correctionText,
+          timestamp: Date.now(),
+          nodeId: currentNodeId,
+          mode: currentMode
+        }
         setExecuteMessages((prev) => {
-          const updated = [...prev, assistantMsg]
+          const updated = [...prev, assistantMsg, correctionMsg]
           setChatHistory(currentNodeId, 'execute', updated)
           return updated
         })
-      } else {
-        setFullnodeMessages((prev) => {
-          const updated = [...prev, assistantMsg]
-          setChatHistory(currentNodeId, 'fullnode', updated)
+
+        const retryMessages = [
+          ...apiMessages,
+          { role: 'assistant' as const, content: result },
+          { role: 'user' as const, content: correctionText }
+        ]
+        const retryReqId = generateId()
+        requestIdRef.current = retryReqId
+        const retryResult = await window.electronAPI.generateLLMChat({
+          provider: llm.activeProvider,
+          model: activeConfig.model,
+          baseUrl: activeConfig.baseUrl,
+          systemPrompt: fullSystemPrompt,
+          messages: retryMessages,
+          requestId: retryReqId
+        })
+
+        const retryElapsed = Date.now() - startTimeRef.current
+        const { status: retryStatus, ops: retryOps } = parseRetryResult(retryResult)
+
+        const retryMsgId = generateId()
+        const retryAssistantMsg: ChatMessage = {
+          id: retryMsgId,
+          role: 'assistant',
+          content: retryResult,
+          timestamp: Date.now(),
+          elapsedMs: retryElapsed,
+          mode: currentMode,
+          nodeId: currentNodeId,
+          responseStatus: retryStatus,
+          provider: llm.activeProvider,
+          model: activeConfig.model
+        }
+        if (retryOps) {
+          setPendingProposal({ nodeId: currentNodeId, messageId: retryMsgId, operations: retryOps })
+        }
+        setExecuteMessages((prev) => {
+          const updated = [...prev, retryAssistantMsg]
+          setChatHistory(currentNodeId, 'execute', updated)
           return updated
         })
+      }
+
+      // Auto-retry on parse or validation failure — once, unless we already retried.
+      // For all_invalid: only retry if there are actual _invalid ops (tagged.length === 0
+      // means ops were diffed away as no-ops, which is not a failure worth retrying).
+      const lastUserMsg = apiMessages.filter((m) => m.role === 'user').at(-1)
+      const isAlreadyRetried = lastUserMsg?.content.startsWith('[FORMAT CORRECTION]') ||
+                               lastUserMsg?.content.startsWith('[VALIDATION CORRECTION]')
+      const hasRealInvalidOps = (taggedOps ?? []).some((op: any) => op._invalid)
+
+      if (currentMode === 'execute' && !isAlreadyRetried &&
+          (responseStatus === 'parse_failed' || (responseStatus === 'all_invalid' && hasRealInvalidOps))) {
+
+        let correctionText: string
+
+        if (responseStatus === 'parse_failed') {
+          const truncatedBad = result.length > 800 ? result.slice(0, 800) + '…' : result
+          correctionText = `[FORMAT CORRECTION]
+Your previous response was not in the required JSON format. You returned:
+
+${truncatedBad}
+
+You MUST respond with ONLY a valid JSON object — no markdown, no code fences, no explanation:
+{"operations": [...]}
+
+Each item must have an "op" field (add_input, update_input, delete_input, add_output, update_output, delete_output, set_code, set_identity, set_advanced).
+Example: {"operations": [{"op": "set_code", "code": "        return (image,)"}]}
+
+Re-read the original request and respond correctly now.`
+
+        } else {
+          // all_invalid — list each failing op with its error, then show actual node state
+          const failureLines = (taggedOps ?? [])
+            .filter((op: any) => op._invalid)
+            .map((op: any, i: number) => `${i + 1}. ${op.op} "${op.name ?? ''}" → ${op._error ?? 'validation failed'}`)
+            .join('\n')
+
+          const inputList = node.inputs.map((i) => `"${i.name}" (${i.type}${i.required ? ', required' : ', optional'})`).join(', ') || '(none)'
+          const outputList = node.outputs.map((o) => `"${o.name}" (${o.type})`).join(', ') || '(none)'
+
+          correctionText = `[VALIDATION CORRECTION]
+Your previous operations failed validation:
+
+${failureLines}
+
+Current node state — these are the EXACT names you must reference:
+  Inputs:  ${inputList}
+  Outputs: ${outputList}
+
+Rules:
+- update_input / delete_input → name must match an existing input exactly
+- update_output / delete_output → name must match an existing output exactly
+- To create a new input use add_input, new output use add_output
+- Do NOT reference names that do not exist above
+
+Re-read the original request and respond with corrected JSON now.`
+        }
+
+        try {
+          await fireAutoRetry(correctionText)
+        } catch (retryErr) {
+          const retryErrMsg = (retryErr as Error).message ?? String(retryErr)
+          if (!retryErrMsg.includes('abort') && !retryErrMsg.includes('cancel')) {
+            setExecuteMessages((prev) => [...prev, {
+              id: generateId(), role: 'error' as const,
+              content: `Auto-retry failed: ${retryErrMsg}`,
+              timestamp: Date.now(), nodeId: currentNodeId
+            }])
+          }
+        }
+      } else {
+        if (currentMode === 'execute') {
+          setExecuteMessages((prev) => {
+            const updated = [...prev, assistantMsg]
+            setChatHistory(currentNodeId, 'execute', updated)
+            return updated
+          })
+        } else {
+          setFullnodeMessages((prev) => {
+            const updated = [...prev, assistantMsg]
+            setChatHistory(currentNodeId, 'fullnode', updated)
+            return updated
+          })
+        }
       }
     } catch (e) {
       const errMessage = (e as Error).message ?? String(e)
@@ -1275,23 +1519,44 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
             </Select>
           </div>
           <div className="flex-1 min-w-0">
-            {modelList.length > 0 ? (
-              <Select
-                value={activeConfig.model}
-                onValueChange={(m) => setProviderModel(llm.activeProvider, m)}
-              >
-                <SelectTrigger className="h-7 text-xs">
-                  <SelectValue placeholder="Select model..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelList.map((m) => (
-                    <SelectItem key={m} value={m}>
-                      {m}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : llm.activeProvider === 'ollama' ? (
+            {modelList.length > 0 ? (() => {
+              const provFavs = favoriteModels[llm.activeProvider] ?? []
+              const favs = modelList.filter((m) => provFavs.includes(m))
+              const others = modelList.filter((m) => !provFavs.includes(m))
+              return (
+                <Select
+                  value={activeConfig.model}
+                  onValueChange={(m) => setProviderModel(llm.activeProvider, m)}
+                >
+                  <SelectTrigger className="h-7 text-xs">
+                    <SelectValue placeholder="Select model..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {favs.length > 0 && (
+                      <SelectGroup>
+                        <SelectLabel className="text-yellow-500/80">⭐ Favorites</SelectLabel>
+                        {favs.map((m) => (
+                          <SelectItem key={m} value={m} className="text-yellow-300">
+                            {m}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                    {favs.length > 0 && others.length > 0 && <SelectSeparator />}
+                    {others.length > 0 && (
+                      <SelectGroup>
+                        {favs.length > 0 && <SelectLabel>Others</SelectLabel>}
+                        {others.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    )}
+                  </SelectContent>
+                </Select>
+              )
+            })() : llm.activeProvider === 'ollama' ? (
               <Button
                 variant="outline"
                 size="sm"
@@ -1329,6 +1594,17 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
             <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
+        {/* Ollama VRAM indicator — only shown for models actively using VRAM */}
+        {llm.activeProvider === 'ollama' && ollamaRunning.filter((m) => m.size_vram > 0).length > 0 && (
+          <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1.5">
+            {ollamaRunning.filter((m) => m.size_vram > 0).map((m) => (
+              <span key={m.name} className="text-[10px] text-slate-500">
+                <span className="text-slate-400">{m.name}</span>
+                <span className="ml-1 text-emerald-600">{(m.size_vram / 1073741824).toFixed(1)} GB VRAM</span>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Sub-tab selector */}
@@ -1406,10 +1682,12 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
           <div
             key={msg.id}
             className={cn(
-              'relative rounded-lg px-3 py-2 text-sm',
+              'relative rounded-lg px-3 py-2 text-sm select-text',
               msg.role === 'user' && 'bg-blue-900/30 border border-blue-800/40 ml-8',
               msg.role === 'assistant' && 'bg-slate-800/50 border border-slate-700/50 mr-4',
-              msg.role === 'error' && 'bg-red-900/20 border border-red-800/40'
+              msg.role === 'error' && 'bg-red-900/20 border border-red-800/40',
+              msg.role === 'correction' && 'bg-amber-950/40 border border-amber-800/40 ml-8',
+              msg.role === 'rejection' && 'bg-red-950/40 border border-red-800/40'
             )}
           >
             {msg.role === 'error' ? (
@@ -1426,6 +1704,16 @@ export function LLMTab({ node }: LLMTabProps): JSX.Element {
                     </button>
                   )}
                 </span>
+              </p>
+            ) : msg.role === 'correction' ? (
+              <p className="flex items-start gap-1.5 text-xs text-amber-400/80">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span className="whitespace-pre-wrap">{msg.content}</span>
+              </p>
+            ) : msg.role === 'rejection' ? (
+              <p className="flex items-start gap-1.5 text-xs text-red-400">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span className="whitespace-pre-wrap">{msg.content}</span>
               </p>
             ) : msg.role === 'user' ? (
               <p className="text-slate-200 whitespace-pre-wrap pr-5">{msg.content}</p>

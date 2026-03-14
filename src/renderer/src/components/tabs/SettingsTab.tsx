@@ -11,7 +11,7 @@ import { Label } from '../ui/label'
 import { Textarea } from '../ui/textarea'
 import { Switch } from '../ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
-import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw, X, Plus, ChevronDown, ChevronRight } from 'lucide-react'
+import { CheckCircle2, XCircle, Loader2, Eye, EyeOff, RefreshCw, X, Plus, ChevronDown, ChevronRight, Star } from 'lucide-react'
 import { cn } from '../../lib/utils'
 
 const PROVIDERS: LLMProvider[] = ['openai', 'anthropic', 'google', 'groq', 'xai', 'openrouter', 'ollama']
@@ -228,6 +228,8 @@ function AIAssistantSubTab(): JSX.Element {
     customModels,
     addCustomModel,
     removeCustomModel,
+    favoriteModels,
+    toggleFavoriteModel,
     customInstructions,
     setCustomInstructions,
     instructionScope,
@@ -252,14 +254,7 @@ function AIAssistantSubTab(): JSX.Element {
   const [fetchingModels, setFetchingModels] = useState(false)
   const [fetchingGroqModels, setFetchingGroqModels] = useState(false)
   const [newModelInput, setNewModelInput] = useState<Record<string, string>>({})
-
-  // System prompt UI state
-  const [systemPromptOpen, setSystemPromptOpen] = useState(false)
-  const [expandedProviders, setExpandedProviders] = useState<Set<string>>(new Set())
-
-  // Per-model form state
-  const [newModelProvider, setNewModelProvider] = useState<LLMProvider>(llm.activeProvider)
-  const [newModelName, setNewModelName] = useState('')
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; provider: LLMProvider; model: string } | null>(null)
 
   useEffect(() => {
     window.electronAPI.getApiKeyStatus().then((status: Record<string, boolean>) => {
@@ -315,31 +310,17 @@ function AIAssistantSubTab(): JSX.Element {
     }
   }
 
-  function toggleProviderExpand(provider: string): void {
-    setExpandedProviders((prev) => {
-      const next = new Set(prev)
-      if (next.has(provider)) next.delete(provider)
-      else next.add(provider)
-      return next
-    })
-  }
-
-  function handleAddModelInstruction(): void {
-    const key = `${newModelProvider}:${newModelName.trim()}`
-    if (!newModelName.trim()) return
-    setModelInstruction(key, '')
-    setNewModelName('')
-  }
-
-  // Build available models for per-model datalist
-  function getModelsForProvider(provider: LLMProvider): string[] {
-    let base: string[]
-    if (provider === 'ollama') base = ollamaModels
-    else if (provider === 'groq') base = groqModels.length > 0 ? groqModels : DEFAULT_MODELS.groq
-    else base = DEFAULT_MODELS[provider]
-    const custom = customModels[provider] ?? []
-    return [...new Set([...base, ...custom])]
-  }
+  // Close context menu on any click
+  useEffect(() => {
+    if (!contextMenu) return
+    const close = (): void => setContextMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('contextmenu', close)
+    }
+  }, [contextMenu])
 
   return (
     <div className="space-y-6">
@@ -350,6 +331,10 @@ function AIAssistantSubTab(): JSX.Element {
         <div>
           <h3 className="text-sm font-semibold text-slate-200">AI Providers</h3>
           <p className="text-xs text-muted-foreground mt-0.5">Configure API keys and models for each provider.</p>
+          <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+            <Star className="h-3 w-3 text-yellow-500/70 shrink-0" />
+            Right-click any model pill to add or remove it from your favorites.
+          </p>
         </div>
         {PROVIDERS.map((provider) => {
           const config = llm.providers[provider]
@@ -478,38 +463,64 @@ function AIAssistantSubTab(): JSX.Element {
                     ))}
                   </datalist>
                 </div>
-                {allModels.length > 0 && (
-                  <div className="flex flex-wrap gap-1">
-                    {allModels.map((m) => {
-                      const isCustom = userModels.includes(m)
-                      return (
-                        <div key={m} className="flex items-center gap-0">
-                          <button
-                            className={cn(
-                              'px-2 py-0.5 text-xs border transition-colors',
-                              isCustom ? 'rounded-l' : 'rounded',
-                              config.model === m
-                                ? 'bg-blue-600/30 border-blue-500 text-blue-300'
-                                : 'border-slate-700 text-slate-400 hover:border-slate-600 hover:text-slate-300'
-                            )}
-                            onClick={() => setProviderModel(provider, m)}
-                          >
-                            {m}
-                          </button>
-                          {isCustom && (
-                            <button
-                              className="px-1 py-0.5 rounded-r text-xs border border-l-0 border-slate-700 text-slate-500 hover:text-red-400 hover:border-red-800 transition-colors"
-                              onClick={() => removeCustomModel(provider, m)}
-                              title="Remove custom model"
-                            >
-                              <X className="h-2.5 w-2.5" />
-                            </button>
+                {allModels.length > 0 && (() => {
+                  const provFavs = favoriteModels[provider] ?? []
+                  const favs = allModels.filter((m) => provFavs.includes(m))
+                  const others = allModels.filter((m) => !provFavs.includes(m))
+                  const renderPill = (m: string, isFav: boolean): JSX.Element => {
+                    const isCustom = userModels.includes(m)
+                    const isActive = config.model === m
+                    return (
+                      <div key={m} className="flex items-center gap-0">
+                        <button
+                          className={cn(
+                            'flex items-center gap-1 px-2 py-0.5 text-xs border transition-colors',
+                            isCustom ? 'rounded-l' : 'rounded',
+                            isFav && isActive && 'bg-yellow-600/20 border-yellow-500 text-yellow-300',
+                            isFav && !isActive && 'border-yellow-700/60 text-yellow-400 hover:border-yellow-500 hover:text-yellow-300',
+                            !isFav && isActive && 'bg-blue-600/30 border-blue-500 text-blue-300',
+                            !isFav && !isActive && 'border-slate-700 text-slate-400 hover:border-slate-600 hover:text-slate-300'
                           )}
+                          onClick={() => setProviderModel(provider, m)}
+                          onContextMenu={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setContextMenu({ x: e.clientX, y: e.clientY, provider, model: m })
+                          }}
+                          title="Right-click to favorite"
+                        >
+                          {isFav && <Star className="h-2.5 w-2.5 fill-yellow-400 text-yellow-400 shrink-0" />}
+                          {m}
+                        </button>
+                        {isCustom && (
+                          <button
+                            className="px-1 py-0.5 rounded-r text-xs border border-l-0 border-slate-700 text-slate-500 hover:text-red-400 hover:border-red-800 transition-colors"
+                            onClick={() => removeCustomModel(provider, m)}
+                            title="Remove custom model"
+                          >
+                            <X className="h-2.5 w-2.5" />
+                          </button>
+                        )}
+                      </div>
+                    )
+                  }
+                  return (
+                    <div className="space-y-1.5">
+                      {favs.length > 0 && (
+                        <div>
+                          <p className="text-[10px] text-yellow-600 uppercase tracking-wide mb-1">Favorites</p>
+                          <div className="flex flex-wrap gap-1">{favs.map((m) => renderPill(m, true))}</div>
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
+                      )}
+                      {others.length > 0 && (
+                        <div>
+                          {favs.length > 0 && <p className="text-[10px] text-slate-600 uppercase tracking-wide mb-1">Others</p>}
+                          <div className="flex flex-wrap gap-1">{others.map((m) => renderPill(m, false))}</div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
                 {/* Add custom model */}
                 <div className="flex gap-2 pt-1">
                   <Input
@@ -570,6 +581,25 @@ function AIAssistantSubTab(): JSX.Element {
         })}
       </div>
 
+      {/* Context menu for favoriting models */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-[160px] rounded-md border border-slate-700 bg-slate-900 shadow-lg py-1 text-xs"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="flex items-center gap-2 w-full px-3 py-1.5 text-left hover:bg-slate-800 transition-colors"
+            onClick={() => { toggleFavoriteModel(contextMenu.provider, contextMenu.model); setContextMenu(null) }}
+          >
+            {(favoriteModels[contextMenu.provider] ?? []).includes(contextMenu.model) ? (
+              <><Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" /> Remove from Favorites</>
+            ) : (
+              <><Star className="h-3.5 w-3.5 text-yellow-400" /> Add to Favorites</>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

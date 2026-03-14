@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   fetchOllamaModels: (baseUrl: string) =>
     ipcRenderer.invoke('llm:fetch-ollama-models', baseUrl),
 
+  fetchOllamaPs: (baseUrl: string) =>
+    ipcRenderer.invoke('llm:fetch-ollama-ps', baseUrl),
+
   fetchGroqModels: () =>
     ipcRenderer.invoke('llm:fetch-groq-models'),
 

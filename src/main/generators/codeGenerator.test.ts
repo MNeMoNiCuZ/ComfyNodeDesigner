@@ -310,14 +310,14 @@ describe('generateAllFiles — nodeFiles', () => {
     expect(nodeFiles['node_b']).toContain('class node_b:')
   })
 
-  it('initPyIndividual uses from .internalName import syntax', () => {
+  it('initPyIndividual uses from .nodes.internalName import syntax', () => {
     const nodes = [
       makeNode({ id: '1', internalName: 'node_a', displayName: 'Node A' }),
       makeNode({ id: '2', internalName: 'node_b', displayName: 'Node B' })
     ]
     const { initPyIndividual } = generateAllFiles(nodes, 'test_pack')
-    expect(initPyIndividual).toContain('from .node_a import NODE_CLASS_MAPPINGS as _m0')
-    expect(initPyIndividual).toContain('from .node_b import NODE_CLASS_MAPPINGS as _m1')
+    expect(initPyIndividual).toContain('from .nodes.node_a import NODE_CLASS_MAPPINGS as _m0')
+    expect(initPyIndividual).toContain('from .nodes.node_b import NODE_CLASS_MAPPINGS as _m1')
     expect(initPyIndividual).toContain('NODE_CLASS_MAPPINGS = {**_m0, **_m1}')
     expect(initPyIndividual).toContain('NODE_DISPLAY_NAME_MAPPINGS = {**_d0, **_d1}')
   })

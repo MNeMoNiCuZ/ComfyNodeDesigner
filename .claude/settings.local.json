@@ -7,7 +7,9 @@
       "Bash(npm test:*)",
       "Bash(npm run:*)",
       "Bash(gh pr:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(grep -r \"role === 'user'\\\\|role === 'assistant'\\\\|ChatMessage\" /d/AI/Projects/Code/ComfyNodeDesigner/ComfyNodeDesigner/src/renderer/src --include=\"*.tsx\" --include=\"*.ts\" -l)",
+      "Bash(cd \"D:\\\\AI\\\\Projects\\\\Code\\\\ComfyNodeDesigner\\\\ComfyNodeDesigner\" && node -e \"console.log\\(require\\('./node_modules/lucide-react/package.json'\\).version\\)\")"
     ]
   }
 }

@@ -33,7 +33,8 @@ View the code for the node.
 | **Inputs** | Add/edit/reorder input sockets and widgets with full type and config |
 | **Outputs** | Add/edit/reorder output sockets |
 | **Advanced** | OUTPUT_NODE, INPUT_NODE, VALIDATE_INPUTS, IS_CHANGED flags |
-| **Preview** | Read-only Monaco Editor showing the full generated Python in real time |
+| **Preview** | Visual ComfyUI-style node preview — shows proposed AI changes as a live diff |
+| **Code** | Editable Monaco Editor showing the full generated Python; locked while an AI proposal is pending |
 | **AI Assistant** | Multi-turn LLM chat for generating or rewriting node logic |
 
 
@@ -85,8 +86,13 @@ View the code for the node.
 - **Multi-turn chat** — full conversation history per node, per mode, persisted across sessions
 - **Configurable context window** — control how many past messages are sent to the LLM
 - **Abort / cancel** — stop generation mid-stream
-- **Proposal preview** — proposed changes are shown as a diff in the Inputs/Outputs tabs before you accept
+- **Proposal preview** — proposed changes shown as a live diff in the Inputs/Outputs/Preview/Code tabs before accepting
+- **Proposal diff in Code tab** — side-by-side Monaco diff view of current vs proposed code while a proposal is pending
+- **Rejected proposal log** — when you reject an AI proposal, the rejected changes are recorded in the chat and included in subsequent LLM context so the model knows what was tried and refused
+- **Auto-retry on format / validation errors** — if the LLM returns malformed JSON or invalid operations, the app automatically sends a correction prompt and retries once
+- **Tooltip / description enforcement** — the system prompt and validation require all inputs and outputs to have a tooltip; invalid entries are flagged and retried
 - **Custom AI instructions** — extra guidance appended to the system prompt, scoped to global / provider / model
+- **Favorite models** — right-click any model pill in Settings → AI Providers to star it; favorites appear at the top in gold in both the settings list and the model dropdown in the AI Assistant tab
 
 ### LLM providers
 
@@ -96,6 +102,8 @@ OpenAI, Anthropic (Claude), Google Gemini, Groq, xAI (Grok), OpenRouter, Ollama 
 - Test connection button per provider
 - Fetch available models from Ollama or Groq with one click
 - Add custom model names for any provider
+- **Favorite models** — right-click a model pill to star it; favorites shown at the top in gold, grouped separately from other models
+- **Ollama VRAM usage** — when Ollama is the active provider, shows live VRAM usage for any models currently loaded in GPU memory
 
 ### Import existing node packs
 
@@ -196,7 +204,7 @@ Output goes to `dist/`:
 3. Go to **Inputs** → **Add Input** to add each input socket or widget
 4. Go to **Outputs** → **Add Output** to add each output socket
 5. Optionally configure **Advanced** flags
-6. Open **Preview** to see the generated Python
+6. Open **Preview** to see the visual node preview, or **Code** to see and edit the generated Python
 
 ### Generating logic with an LLM
 
