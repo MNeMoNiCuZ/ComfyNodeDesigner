@@ -31,10 +31,17 @@ export function TitleBar(): JSX.Element {
   const [nameValue, setNameValue] = useState(project.name)
   const [recentOpen, setRecentOpen] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
+  const [importToast, setImportToast] = useState<{ message: string; isError: boolean } | null>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const recentDropdownRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setNameValue(project.name) }, [project.name])
+
+  useEffect(() => {
+    if (!importToast) return
+    const t = setTimeout(() => setImportToast(null), 3000)
+    return () => clearTimeout(t)
+  }, [importToast])
   useEffect(() => { if (editingName) nameInputRef.current?.select() }, [editingName])
 
   // Close recent dropdown when clicking outside
@@ -114,7 +121,7 @@ export function TitleBar(): JSX.Element {
 
   async function doImport(rawNodes: any[]): Promise<void> {
     if (!rawNodes || rawNodes.length === 0) {
-      alert('No nodes found in the selected location.')
+      setImportToast({ message: 'No nodes found in the selected location.', isError: true })
       return
     }
     const converted: ComfyNodeDef[] = rawNodes.map((raw: any) => {
@@ -150,7 +157,7 @@ export function TitleBar(): JSX.Element {
       })
     })
     importNodes(converted)
-    alert(`Imported ${converted.length} node${converted.length !== 1 ? 's' : ''}.`)
+    setImportToast({ message: `Imported ${converted.length} node${converted.length !== 1 ? 's' : ''}.`, isError: false })
   }
 
   async function handleDirectExport(): Promise<void> {
@@ -173,7 +180,7 @@ export function TitleBar(): JSX.Element {
       const rawNodes = await window.electronAPI.importNodeFolder()
       await doImport(rawNodes)
     } catch (e) {
-      alert(`Import failed: ${(e as Error).message ?? String(e)}`)
+      setImportToast({ message: `Import failed: ${(e as Error).message ?? String(e)}`, isError: true })
     }
   }
 
@@ -182,7 +189,7 @@ export function TitleBar(): JSX.Element {
       const rawNodes = await window.electronAPI.importNodeFile()
       await doImport(rawNodes)
     } catch (e) {
-      alert(`Import failed: ${(e as Error).message ?? String(e)}`)
+      setImportToast({ message: `Import failed: ${(e as Error).message ?? String(e)}`, isError: true })
     }
   }
 
@@ -348,6 +355,18 @@ export function TitleBar(): JSX.Element {
         onImportFolder={handleImportFolder}
       />
       <ExportToast exportedPath={exportedPath} onDismiss={() => setExportedPath(null)} />
+      {importToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 pointer-events-none">
+          <div className={cn(
+            'px-4 py-2.5 rounded-lg border shadow-xl text-sm font-medium',
+            importToast.isError
+              ? 'bg-red-900/90 border-red-700/60 text-red-200'
+              : 'bg-slate-800/95 border-green-700/40 text-slate-100'
+          )}>
+            {importToast.message}
+          </div>
+        </div>
+      )}
     </>
   )
 }
