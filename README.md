@@ -96,7 +96,7 @@ View the code for the node.
 
 ### LLM providers
 
-OpenAI, Anthropic (Claude), Google Gemini, Groq, xAI (Grok), OpenRouter, Ollama (local)
+OpenAI, Anthropic (Claude), Google Gemini, Groq, xAI (Grok), MiniMax, OpenRouter, Ollama (local)
 
 - API keys encrypted and stored locally via Electron `safeStorage` — never sent anywhere except the provider's own API
 - Test connection button per provider
@@ -252,6 +252,7 @@ API keys are encrypted and stored locally using Electron's `safeStorage`. They a
 | Google Gemini | [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey) |
 | Groq | [console.groq.com/keys](https://console.groq.com/keys) |
 | xAI (Grok) | [console.x.ai](https://console.x.ai) |
+| MiniMax | [platform.minimaxi.com](https://platform.minimaxi.com) |
 | OpenRouter | [openrouter.ai/keys](https://openrouter.ai/keys) |
 | Ollama (local) | No key needed — install [Ollama](https://ollama.com) and pull a model |
 
@@ -274,7 +275,7 @@ ComfyNodeDesigner/
 │   │   ├── index.ts             # Window creation and IPC registration
 │   │   ├── ipc/
 │   │   │   ├── fileHandlers.ts  # Save/load/export/import — uses Electron dialogs + fs
-│   │   │   └── llmHandlers.ts   # All 7 LLM provider adapters with abort support
+│   │   │   └── llmHandlers.ts   # All 8 LLM provider adapters with abort support
 │   │   └── generators/
 │   │       ├── codeGenerator.ts # Python code generation logic
 │   │       └── nodeImporter.ts  # Python node pack parser (folder + file import)

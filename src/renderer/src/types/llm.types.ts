@@ -4,6 +4,7 @@ export type LLMProvider =
   | 'google'
   | 'groq'
   | 'xai'
+  | 'minimax'
   | 'openrouter'
   | 'ollama'
 
@@ -68,6 +69,7 @@ export const DEFAULT_MODELS: Record<LLMProvider, string[]> = {
     'meta-llama/llama-4-scout-17b-16e-instruct'
   ],
   xai: ['grok-3', 'grok-3-mini', 'grok-2'],
+  minimax: ['MiniMax-M2.5', 'MiniMax-M2.5-highspeed'],
   openrouter: ['openai/gpt-5.4', 'anthropic/claude-sonnet-4-6', 'google/gemini-3.1-pro', 'meta-llama/llama-3.3-70b-instruct'],
   ollama: []  // Populated dynamically from local Ollama instance
 }
@@ -78,6 +80,7 @@ export const PROVIDER_LABELS: Record<LLMProvider, string> = {
   google: 'Google (Gemini)',
   groq: 'Groq',
   xai: 'xAI (Grok)',
+  minimax: 'MiniMax',
   openrouter: 'OpenRouter',
   ollama: 'Ollama (Local)'
 }
@@ -90,6 +93,7 @@ export const DEFAULT_LLM_SETTINGS: LLMSettings = {
     google: { provider: 'google', model: 'gemini-3.1-pro' },
     groq: { provider: 'groq', model: 'openai/gpt-oss-120b' },
     xai: { provider: 'xai', model: 'grok-3', baseUrl: 'https://api.x.ai/v1' },
+    minimax: { provider: 'minimax', model: 'MiniMax-M2.5', baseUrl: 'https://api.minimax.io/v1' },
     openrouter: {
       provider: 'openrouter',
       model: 'openai/gpt-5.4',
